@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>トレード KGI/KPI ダッシュボード</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/regenerator-runtime@0.14.1/runtime.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', system-ui, sans-serif; }
+    ::-webkit-scrollbar { width:6px; height:6px; }
+    ::-webkit-scrollbar-track { background:#111827; }
+    ::-webkit-scrollbar-thumb { background:#374151; border-radius:3px; }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter:invert(0.6); }
+    .fade-in  { animation: fadeIn  0.18s ease; }
+    .slide-in { animation: slideIn 0.20s ease; }
+    @keyframes fadeIn  { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes slideIn { from{opacity:0;transform:translateX(8px)}  to{opacity:1;transform:translateX(0)} }
+    .pending-row { background: rgba(251,191,36,0.06); }
+    .pending-row:hover { background: rgba(251,191,36,0.1) !important; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    {% raw %}
+    const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+    // ── Storage Keys ──────────────────────────────────────────────────────
+    const TRADES_KEY      = 'tradedb_trades_v2';
+    const DEMO_TRADES_KEY = 'tradedb_demo_trades_v2';
+    const SETTINGS_KEY    = 'tradedb_settings_v2';
+
+    const DEFAULT_SETTINGS = {
+      initialBalance:     1000,
+      monthlyTargetPct:   20,
+      dailyLossLimitPct:  6,
+      monthlyDDLimitPct:  10,
+      minWinRate:         50,
+      minRR:              2.0,
+      minComplianceRate:  90,
+      maxRiskPerTradePct: 2,
+      demoInitialBalance: 10000,
+    };
+
+    const api = {
+      get: async (url) => { const r = await fetch(url); return r.json(); },
+      post: async (url, data) => { const r = await fetch(url, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }); return r.json(); },
+      put: async (url, data) => { const r = await fetch(url, { method: 'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }); return r.json(); },
+      del: async (url) => { const r = await fetch(url, { method: 'DELETE' }); return r.json(); },
+    };
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+    const todayStr  = () => new Date().toISOString().split('T')[0];
+    const thisMonth = () => todayStr().slice(0, 7);
+    const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+    const fmt$    = (v) => { const a = Math.abs(v).toFixed(2); return v >= 0 ? `+$${a}` : `-$${a}`; };
+    const fmtAbs$ = (v) => `$${Math.abs(v).toFixed(2)}`;
+    const fmtPct  = (v) => { const a = Math.abs(v).toFixed(1); return v >= 0 ? `+${a}%` : `-${a}%`; };
+    const fmtDate = (s) => { if (!s) return ''; const [y,m,d] = s.split('-'); return `${y}/${m}/${d}`; };
+
+    const fmtPrice = (v, pair) => {
+      const n = parseFloat(v);
+      if (isNaN(n)) return '—';
+      const p = (pair||'').toUpperCase();
+      if (p.includes('JPY')) return n.toFixed(3);
+      if (p.includes('XAU')||p.includes('GOLD')) return n.toFixed(2);
+      if (!p.includes('/')) return n.toFixed(2);
+      return n.toFixed(5);
+    };
+
+    // pip size per instrument
+    const getPipSize = (pair) => {
+      const p = (pair||'').toUpperCase();
+      if (p.includes('JPY')) return 0.01;
+      if (/XAU|GOLD|SILVER|XAG/.test(p)) return 0.01;
+      if (!p.includes('/') || /BTC|ETH|DOGE/.test(p)) return 1;
+      return 0.0001;
+    };
+    const getPipLabel = (pair) => {
+      const p = (pair||'').toUpperCase();
+      if (!p.includes('/') || /BTC|ETH/.test(p)) return 'pt';
+      return 'pips';
+    };
+
+    // net P&L helper (commission always costs money)
+    const netPnl = (t) => t.status === 'pending' ? 0 : (t.pnl || 0) - (t.commission || 0);
+
+    // ── Metrics ───────────────────────────────────────────────────────────
+    const calcMetrics = (allTrades, initialBalance, settings, month) => {
+      const closed = allTrades.filter(t => t.status !== 'pending');
+
+      const monthTrades  = closed.filter(t => t.date.startsWith(month));
+      const todayTrades  = closed.filter(t => t.date === todayStr());
+
+      const total   = monthTrades.length;
+      const wins    = monthTrades.filter(t => t.result === 'win').length;
+      const losses  = total - wins;
+      const winRate = total > 0 ? wins / total * 100 : null;
+
+      const rrArr = monthTrades.filter(t => t.rr > 0).map(t => t.rr);
+      const avgRR = rrArr.length > 0 ? rrArr.reduce((s,v)=>s+v,0)/rrArr.length : null;
+
+      const compliantCount = monthTrades.filter(t => t.ruleCompliant).length;
+      const complianceRate = total > 0 ? compliantCount/total*100 : null;
+
+      const monthNetPnL  = monthTrades.reduce((s,t) => s+netPnl(t), 0);
+      const monthGrossPnL= monthTrades.reduce((s,t) => s+(t.pnl||0), 0);
+      const monthCommission = monthTrades.reduce((s,t) => s+(t.commission||0), 0);
+      const monthTarget  = initialBalance * settings.monthlyTargetPct / 100;
+      const kgiPct       = monthTarget > 0 ? monthNetPnL/monthTarget*100 : 0;
+
+      const todayLoss         = todayTrades.reduce((s,t) => s + Math.min(0, netPnl(t)), 0);
+      const dailyLossLimitAmt = initialBalance * settings.dailyLossLimitPct / 100;
+      const dailyLimitHit     = todayTrades.length > 0 && Math.abs(todayLoss) >= dailyLossLimitAmt;
+
+      // Monthly DD (on net P&L)
+      const priorClosed = closed.filter(t => t.date < month+'-01');
+      let bal  = initialBalance + priorClosed.reduce((s,t)=>s+netPnl(t),0);
+      let peak = bal, maxDD = 0;
+      const sorted = [...monthTrades].sort((a,b)=>a.date.localeCompare(b.date));
+      for (const t of sorted) {
+        bal += netPnl(t);
+        if (bal > peak) peak = bal;
+        const dd = initialBalance > 0 ? (bal-peak)/initialBalance*100 : 0;
+        if (dd < maxDD) maxDD = dd;
+      }
+
+      const currentBalance = initialBalance + closed.reduce((s,t)=>s+netPnl(t),0);
+
+      // Commission stats
+      const allMonthGross = Math.abs(monthGrossPnL);
+      const commissionRate = allMonthGross > 0 ? monthCommission/allMonthGross*100 : 0;
+
+      // Pending count
+      const pendingCount = allTrades.filter(t => t.status==='pending' && t.date.startsWith(month)).length;
+
+      return {
+        total, wins, losses, winRate, avgRR, complianceRate,
+        monthNetPnL, monthGrossPnL, monthCommission, commissionRate,
+        monthTarget, kgiPct,
+        todayLoss, dailyLossLimitAmt, dailyLimitHit,
+        maxDD, currentBalance, pendingCount,
+      };
+    };
+
+    // ── Entry Evaluation ──────────────────────────────────────────────────
+    const evaluateEntry = ({ direction, pair, entry, sl, tp, lotSize, pipValuePerLot, manualRisk, settings, metrics }) => {
+      const eN = parseFloat(entry);
+      const sN = parseFloat(sl);
+      const tN = parseFloat(tp);
+      if ([eN,sN,tN].some(isNaN)) return null;
+
+      let riskPriceDiff, rewardPriceDiff, validLevels;
+      if (direction === 'long') {
+        riskPriceDiff   = eN - sN;
+        rewardPriceDiff = tN - eN;
+        validLevels     = sN < eN && tN > eN;
+      } else {
+        riskPriceDiff   = sN - eN;
+        rewardPriceDiff = eN - tN;
+        validLevels     = sN > eN && tN < eN;
+      }
+
+      if (!validLevels || riskPriceDiff <= 0 || rewardPriceDiff <= 0) {
+        return { error: direction==='long'
+          ? 'ロング: SL < エントリー < TP の順が必要です'
+          : 'ショート: TP < エントリー < SL の順が必要です' };
+      }
+
+      const pipSz  = getPipSize(pair);
+      const slPips = riskPriceDiff   / pipSz;
+      const tpPips = rewardPriceDiff / pipSz;
+      const rr     = rewardPriceDiff / riskPriceDiff;
+
+      // Position-based or manual risk
+      const lotN  = parseFloat(lotSize);
+      const pvN   = parseFloat(pipValuePerLot);
+      const usingPos = lotN > 0 && pvN > 0;
+
+      let riskAmt, rewardAmt;
+      if (usingPos) {
+        riskAmt   = lotN * pvN * slPips;
+        rewardAmt = lotN * pvN * tpPips;
+      } else {
+        riskAmt = parseFloat(manualRisk);
+        if (isNaN(riskAmt) || riskAmt <= 0) return null;
+        rewardAmt = riskAmt * rr;
+      }
+
+      const riskPct     = riskAmt / metrics.currentBalance * 100;
+      const dailyRemain = metrics.dailyLossLimitAmt - Math.abs(metrics.todayLoss);
+
+      const checks = [
+        {
+          key: 'rr',
+          label: `RR比 1:${rr.toFixed(2)} ≥ 目標 1:${settings.minRR}`,
+          ok: rr >= settings.minRR,
+          detail: rr < settings.minRR
+            ? `あと ${((settings.minRR-rr)*slPips).toFixed(1)} ${getPipLabel(pair)} TPを伸ばすかSLを詰めてください`
+            : null,
+        },
+        {
+          key: 'riskPct',
+          label: `リスク率 ${riskPct.toFixed(2)}% ≤ 上限 ${settings.maxRiskPerTradePct}%`,
+          ok: riskPct <= settings.maxRiskPerTradePct,
+          detail: riskPct > settings.maxRiskPerTradePct
+            ? `リスク $${riskAmt.toFixed(2)} が上限 $${(metrics.currentBalance*settings.maxRiskPerTradePct/100).toFixed(2)} を超えています`
+            : null,
+        },
+        {
+          key: 'dailyBudget',
+          label: `1日損失残枠 $${Math.max(0,dailyRemain).toFixed(2)} ≥ リスク額`,
+          ok: riskAmt <= dailyRemain,
+          detail: riskAmt > dailyRemain
+            ? `残り損失枠 $${Math.max(0,dailyRemain).toFixed(2)} 以内にリスクを抑えてください`
+            : null,
+        },
+        {
+          key: 'ddBudget',
+          label: `月次DD残枠内 (現在 ${metrics.maxDD.toFixed(1)}%)`,
+          ok: metrics.maxDD > -settings.monthlyDDLimitPct,
+          detail: metrics.maxDD <= -settings.monthlyDDLimitPct
+            ? `月次DD上限 -${settings.monthlyDDLimitPct}% に達しています`
+            : null,
+        },
+      ];
+
+      return {
+        rr, slPips, tpPips, riskAmt, rewardAmt, riskPct,
+        riskPriceDiff, rewardPriceDiff, pipSz,
+        usingPos, lotN, pvN,
+        dailyRemain, checks, allOk: checks.every(c=>c.ok),
+        entry: eN, sl: sN, tp: tN, direction, pair,
+      };
+    };
+
+    // ── Status styles ─────────────────────────────────────────────────────
+    const SS = {
+      good:    { border:'border-emerald-500', text:'text-emerald-400', icon:'✅' },
+      warn:    { border:'border-yellow-500',  text:'text-yellow-400',  icon:'⚠️' },
+      bad:     { border:'border-red-500',     text:'text-red-400',     icon:'🚨' },
+      neutral: { border:'border-gray-700',    text:'text-gray-400',    icon:'—'  },
+    };
+    const kpiStat = (v, tgt, higher=true) => {
+      if (v == null) return 'neutral';
+      return higher ? (v>=tgt?'good':v>=tgt*0.85?'warn':'bad')
+                    : (v>=tgt?'good':v>=tgt*1.2?'warn':'bad');
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SMALL COMPONENTS
+    // ══════════════════════════════════════════════════════════════════════
+
+    const KPICard = ({ label, displayValue, targetLabel, status, sub, priority }) => {
+      const s = SS[status]||SS.neutral;
+      return (
+        <div className={`bg-gray-800 rounded-xl p-4 border-l-4 ${s.border} fade-in`}>
+          <div className="flex items-start justify-between mb-2">
+            <span className="text-gray-400 text-xs leading-snug">{label}{priority&&<span className="ml-1 text-red-400">●</span>}</span>
+            <span className="text-base">{s.icon}</span>
+          </div>
+          <div className={`text-2xl font-bold font-mono ${s.text}`}>{displayValue}</div>
+          <div className="text-gray-500 text-xs mt-1">目標: {targetLabel}</div>
+          {sub&&<div className="text-gray-600 text-xs">{sub}</div>}
+        </div>
+      );
+    };
+
+    const KGICard = ({ metrics, settings, month, initialBalance }) => {
+      const { monthNetPnL, monthTarget, kgiPct } = metrics;
+      const pct = Math.min(100, Math.max(0, kgiPct));
+      const color = kgiPct>=100?'bg-emerald-500':kgiPct>=60?'bg-blue-500':kgiPct>=30?'bg-yellow-500':'bg-red-500';
+      const MO={'01':'1月','02':'2月','03':'3月','04':'4月','05':'5月','06':'6月','07':'7月','08':'8月','09':'9月','10':'10月','11':'11月','12':'12月'};
+      const [y,m] = month.split('-');
+      return (
+        <div className="bg-gray-800 rounded-xl p-6">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h2 className="text-base font-bold text-white">🎯 KGI 月次目標</h2>
+              <p className="text-gray-400 text-sm mt-0.5">{y}年 {MO[m]} ｜ 目標: ${monthTarget.toFixed(0)} (月利 {settings.monthlyTargetPct}%)</p>
+            </div>
+            <div className={`text-4xl font-bold font-mono ${kgiPct>=100?'text-emerald-400':kgiPct>=0?'text-white':'text-red-400'}`}>
+              {kgiPct.toFixed(0)}<span className="text-lg text-gray-500">%</span>
+            </div>
+          </div>
+          <div className="w-full bg-gray-700 rounded-full h-3 mb-3 overflow-hidden">
+            <div className={`h-3 rounded-full transition-all duration-700 ${color}`} style={{width:`${pct}%`}} />
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className={monthNetPnL>=0?'text-emerald-400 font-medium':'text-red-400 font-medium'}>{fmt$(monthNetPnL)} <span className="text-gray-600 text-xs font-normal">(純利益)</span></span>
+            <span className="text-gray-500">目標: ${monthTarget.toFixed(0)}</span>
+          </div>
+        </div>
+      );
+    };
+
+    const AlertBanner = ({ metrics, settings }) => {
+      const alerts = [];
+      if (metrics.dailyLimitHit) alerts.push(`🚨 本日の損失が上限 $${metrics.dailyLossLimitAmt.toFixed(0)} (${settings.dailyLossLimitPct}%) に達しました。本日のトレードを終了してください。`);
+      if (metrics.maxDD < -settings.monthlyDDLimitPct) alerts.push(`🚨 月次ドローダウン ${metrics.maxDD.toFixed(1)}% が上限 -${settings.monthlyDDLimitPct}% を超えています。ポジションサイズを縮小してください。`);
+      if (metrics.pendingCount > 0) alerts.push(`⏳ 未決済のトレードが ${metrics.pendingCount} 件あります。「リアルトレード」タブで結果を記録してください。`);
+      if (!alerts.length) return null;
+      return (
+        <div className="space-y-2 mb-5">
+          {alerts.map((msg, i) => (
+            <div key={i} className={`${msg.startsWith('⏳')?'bg-amber-950 border-amber-600':'bg-red-950 border-red-600'} border rounded-xl p-4 text-sm font-medium ${msg.startsWith('⏳')?'text-amber-200':'text-red-200'}`}>
+              {msg}
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    const AssetChart = ({ trades, initialBalance, color='#10b981', label='口座残高' }) => {
+      const canvasRef = useRef(null);
+      const chartRef  = useRef(null);
+
+      const chartData = useMemo(() => {
+        const closed = trades.filter(t=>t.status!=='pending');
+        if (!closed.length) return null;
+        const sorted = [...closed].sort((a,b)=>a.date.localeCompare(b.date));
+        const perDay = {};
+        let bal = initialBalance;
+        for (const t of sorted) { bal += netPnl(t); perDay[t.date] = bal; }
+        const labels = ['開始', ...Object.keys(perDay).map(fmtDate)];
+        const data   = [initialBalance, ...Object.values(perDay)];
+        const ptColors = data.map(v => v>=initialBalance?'#10b981':'#ef4444');
+        return { labels, data, ptColors };
+      }, [trades, initialBalance]);
+
+      useEffect(() => {
+        if (!canvasRef.current) return;
+        if (chartRef.current) { chartRef.current.destroy(); chartRef.current=null; }
+        if (!chartData) return;
+        const ctx = canvasRef.current.getContext('2d');
+        const grad = ctx.createLinearGradient(0,0,0,240);
+        const [r,g,b] = color==='#10b981'?[16,185,129]:[99,102,241];
+        grad.addColorStop(0,`rgba(${r},${g},${b},0.22)`);
+        grad.addColorStop(1,`rgba(${r},${g},${b},0.02)`);
+        chartRef.current = new Chart(ctx, {
+          type:'line',
+          data:{ labels:chartData.labels, datasets:[{
+            label, data:chartData.data, borderColor:color, backgroundColor:grad,
+            borderWidth:2.5, pointRadius:4, pointHoverRadius:7,
+            pointBackgroundColor:chartData.ptColors, pointBorderColor:chartData.ptColors,
+            fill:true, tension:0.35
+          }]},
+          options:{
+            responsive:true, maintainAspectRatio:false,
+            interaction:{mode:'index',intersect:false},
+            plugins:{
+              legend:{labels:{color:'#9ca3af',font:{size:12}}},
+              tooltip:{
+                backgroundColor:'#1f2937',borderColor:'#374151',borderWidth:1,
+                titleColor:'#9ca3af',bodyColor:'#f9fafb',
+                callbacks:{label:ctx=>{const v=ctx.parsed.y;const d=v-initialBalance;return ` $${v.toFixed(2)}  (${d>=0?'+':''}$${d.toFixed(2)})`;}}
+              }
+            },
+            scales:{
+              x:{ticks:{color:'#6b7280',maxRotation:45,font:{size:11}},grid:{color:'#1f2937'}},
+              y:{ticks:{color:'#6b7280',callback:v=>`$${v}`,font:{size:11}},grid:{color:'#374151'}}
+            }
+          }
+        });
+        return ()=>{ if(chartRef.current){chartRef.current.destroy();chartRef.current=null;} };
+      }, [chartData, color, label, initialBalance]);
+
+      return !chartData
+        ? <div className="flex items-center justify-center h-52 text-gray-500 text-sm">トレードを記録すると資産推移が表示されます</div>
+        : <div style={{height:'240px'}}><canvas ref={canvasRef}/></div>;
+    };
+
+    // ── Commission Panel ──────────────────────────────────────────────────
+    const CommissionPanel = ({ metrics }) => {
+      const { monthCommission, commissionRate, total } = metrics;
+      if (monthCommission === 0 && total === 0) return null;
+      return (
+        <div className="bg-gray-800 rounded-xl p-5">
+          <h3 className="text-sm font-bold text-white mb-4">💸 手数料サマリー</h3>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <div className="text-gray-500 text-xs mb-1">今月の手数料合計</div>
+              <div className="text-xl font-bold font-mono text-orange-400">-${monthCommission.toFixed(2)}</div>
+            </div>
+            <div>
+              <div className="text-gray-500 text-xs mb-1">手数料率 (対粗利益)</div>
+              <div className="text-xl font-bold font-mono text-orange-400">
+                {commissionRate > 0 ? `${commissionRate.toFixed(1)}%` : '—'}
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-500 text-xs mb-1">平均手数料/トレード</div>
+              <div className="text-xl font-bold font-mono text-orange-400">
+                {total > 0 ? `-$${(monthCommission/total).toFixed(2)}` : '—'}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ENTRY CHECKER
+    // ══════════════════════════════════════════════════════════════════════
+
+    const PriceLadder = ({ result }) => {
+      if (!result || result.error) return null;
+      const { direction, entry, sl, tp, riskAmt, rewardAmt, rr, slPips, tpPips, pair } = result;
+      const isLong  = direction === 'long';
+      const pipLabel = getPipLabel(pair);
+      const riskH  = 80;
+      const rewH   = Math.min(220, Math.max(30, Math.round(riskH * Math.min(rr, 5))));
+
+      const priceBlock = (price, label, colorClass, bgClass, borderClass, amount, amountColor) => (
+        <div className={`w-full ${bgClass} border ${borderClass} rounded-lg px-4 py-3`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className={`${colorClass} text-xs font-semibold`}>{label}</div>
+              <div className="text-white font-mono text-base">{fmtPrice(price, pair)}</div>
+            </div>
+            {amount !== undefined && (
+              <div className={`text-right ${amountColor} font-mono font-bold text-sm`}>{amount}</div>
+            )}
+          </div>
+        </div>
+      );
+
+      const connector = (pips, dollarAmt, colorLine, colorText, height) => (
+        <div className="flex items-center gap-3 w-full" style={{height:`${height}px`}}>
+          <div className={`w-0.5 h-full ${colorLine} rounded mx-4`} />
+          <div className={`text-xs ${colorText} space-y-0.5`}>
+            <div className="font-mono">{pips.toFixed(1)} {pipLabel}</div>
+            {dollarAmt !== undefined && <div className="font-bold">{dollarAmt}</div>}
+          </div>
+        </div>
+      );
+
+      const levels = isLong
+        ? [
+            { el: priceBlock(tp, 'TP（利確）', 'text-emerald-400', 'bg-emerald-900/30', 'border-emerald-700', fmt$(rewardAmt), 'text-emerald-400') },
+            { el: connector(tpPips, `+${fmtAbs$(rewardAmt)}`, 'bg-emerald-700', 'text-emerald-400', rewH) },
+            { el: priceBlock(entry, 'エントリー', 'text-blue-300', 'bg-blue-900/30', 'border-blue-600', null) },
+            { el: connector(slPips, `-${fmtAbs$(riskAmt)}`, 'bg-red-700', 'text-red-400', riskH) },
+            { el: priceBlock(sl, 'SL（損切）', 'text-red-400', 'bg-red-900/30', 'border-red-700', fmt$(-riskAmt), 'text-red-400') },
+          ]
+        : [
+            { el: priceBlock(sl, 'SL（損切）', 'text-red-400', 'bg-red-900/30', 'border-red-700', fmt$(-riskAmt), 'text-red-400') },
+            { el: connector(slPips, `-${fmtAbs$(riskAmt)}`, 'bg-red-700', 'text-red-400', riskH) },
+            { el: priceBlock(entry, 'エントリー', 'text-blue-300', 'bg-blue-900/30', 'border-blue-600', null) },
+            { el: connector(tpPips, `+${fmtAbs$(rewardAmt)}`, 'bg-emerald-700', 'text-emerald-400', rewH) },
+            { el: priceBlock(tp, 'TP（利確）', 'text-emerald-400', 'bg-emerald-900/30', 'border-emerald-700', fmt$(rewardAmt), 'text-emerald-400') },
+          ];
+
+      return (
+        <div className="flex gap-6">
+          {/* Price ladder */}
+          <div className="flex flex-col items-stretch min-w-[200px] flex-shrink-0">
+            {levels.map((l,i) => <div key={i}>{l.el}</div>)}
+          </div>
+
+          {/* RR bar + summary */}
+          <div className="flex-1 space-y-4">
+            <div>
+              <div className="text-gray-500 text-xs font-semibold uppercase tracking-widest mb-3">RR 比較</div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="bg-red-600 rounded h-7 flex items-center px-3" style={{width:'90px',minWidth:'90px'}}>
+                    <span className="text-white text-xs font-bold">リスク 1</span>
+                  </div>
+                  <span className="text-red-400 text-sm font-mono">{fmtAbs$(riskAmt)}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="bg-emerald-600 rounded h-7 flex items-center px-3 transition-all duration-500"
+                    style={{width:`${Math.min(90*rr,280)}px`,minWidth:'30px'}}>
+                    <span className="text-white text-xs font-bold">リワード {rr.toFixed(2)}</span>
+                  </div>
+                  <span className="text-emerald-400 text-sm font-mono">{fmtAbs$(rewardAmt)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-700 rounded-lg p-3">
+                <div className="text-gray-500 text-xs">RR比</div>
+                <div className="text-xl font-bold font-mono">1:<span className={rr>=2?'text-emerald-400':'text-red-400'}>{rr.toFixed(2)}</span></div>
+              </div>
+              <div className="bg-gray-700 rounded-lg p-3">
+                <div className="text-gray-500 text-xs">リスク率</div>
+                <div className={`text-xl font-bold font-mono ${result.riskPct <= result.settings?.maxRiskPerTradePct ? 'text-emerald-400':'text-red-400'}`}>
+                  {result.riskPct.toFixed(2)}%
+                </div>
+              </div>
+            </div>
+
+            {result.usingPos && (
+              <div className="bg-blue-950/40 border border-blue-800 rounded-lg px-3 py-2 text-xs text-blue-300">
+                📐 {result.lotN} lot × {result.slPips.toFixed(1)} {getPipLabel(result.pair)} × ${result.pvN}/lot = ${result.riskAmt.toFixed(2)}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // attach settings to result for display
+    const withSettings = (result, settings) => result ? { ...result, settings } : result;
+
+    const EntryChecker = ({ settings, metrics, onPrefillTrade }) => {
+      const [direction, setDirection] = useState('long');
+      const [pair,      setPair]      = useState('');
+      const [entry,     setEntry]     = useState('');
+      const [sl,        setSl]        = useState('');
+      const [tp,        setTp]        = useState('');
+      const [lotSize,   setLotSize]   = useState('');
+      const [pipValue,  setPipValue]  = useState('10');
+      const [manualRisk,setManualRisk]= useState('');
+      const [usePosSize,setUsePosSize]= useState(true);
+
+      const result = useMemo(() => {
+        const r = evaluateEntry({ direction, pair, entry, sl, tp, lotSize, pipValuePerLot: pipValue, manualRisk, settings, metrics });
+        return withSettings(r, settings);
+      }, [direction, pair, entry, sl, tp, lotSize, pipValue, manualRisk, settings, metrics]);
+
+      const hasResult = result && !result.error;
+      const pipLabel  = getPipLabel(pair);
+      const inp = "w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500 font-mono";
+
+      return (
+        <div className="space-y-5 fade-in">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+            {/* ── Inputs ── */}
+            <div className="bg-gray-800 rounded-xl p-6 space-y-5">
+              <h2 className="text-base font-bold text-white">🎯 エントリー条件入力</h2>
+
+              {/* Direction */}
+              <div>
+                <label className="block text-gray-400 text-xs mb-2">エントリー方向</label>
+                <div className="flex rounded-lg overflow-hidden border border-gray-700">
+                  {[{v:'long',label:'▲ ロング（買い）'},{v:'short',label:'▼ ショート（売り）'}].map(({v,label})=>(
+                    <button key={v} type="button" onClick={()=>setDirection(v)}
+                      className={`flex-1 py-2 text-sm font-semibold transition-colors ${direction===v?(v==='long'?'bg-emerald-600 text-white':'bg-red-600 text-white'):'bg-gray-700 text-gray-400 hover:text-white'}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Pair */}
+              <div>
+                <label className="block text-gray-400 text-xs mb-1">通貨ペア / 銘柄</label>
+                <input type="text" placeholder="例: USD/JPY, GOLD, NASDAQ" value={pair} onChange={e=>setPair(e.target.value.toUpperCase())}
+                  className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500" />
+                {pair && <p className="text-gray-600 text-xs mt-1">Pipサイズ: {getPipSize(pair)} ({pipLabel})</p>}
+              </div>
+
+              {/* TP / Entry / SL */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs mb-1 text-emerald-400">TP 価格（利確）</label>
+                  <input type="number" step="any" value={tp} onChange={e=>setTp(e.target.value)} className={inp}
+                    placeholder={direction==='long'?'エントリーより高い価格':'エントリーより低い価格'} />
+                </div>
+                <div>
+                  <label className="block text-xs mb-1 text-blue-300">エントリー価格</label>
+                  <input type="number" step="any" value={entry} onChange={e=>setEntry(e.target.value)} className={inp} placeholder="例: 149.500" />
+                </div>
+                <div>
+                  <label className="block text-xs mb-1 text-red-400">SL 価格（損切）</label>
+                  <input type="number" step="any" value={sl} onChange={e=>setSl(e.target.value)} className={inp}
+                    placeholder={direction==='long'?'エントリーより低い価格':'エントリーより高い価格'} />
+                </div>
+
+                {/* pip distances preview */}
+                {result && !result.error && (
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">
+                      <span className="text-gray-500">SL距離: </span>
+                      <span className="text-red-300 font-mono">{result.slPips.toFixed(1)} {pipLabel}</span>
+                    </div>
+                    <div className="bg-emerald-950/40 border border-emerald-800/50 rounded-lg px-3 py-2">
+                      <span className="text-gray-500">TP距離: </span>
+                      <span className="text-emerald-300 font-mono">{result.tpPips.toFixed(1)} {pipLabel}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Position Size */}
+              <div className="border-t border-gray-700 pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-gray-300 text-sm font-semibold">📐 ポジションサイズ</label>
+                  <button type="button" onClick={()=>setUsePosSize(v=>!v)}
+                    className="text-xs text-gray-500 hover:text-blue-400 transition-colors">
+                    {usePosSize ? '手動入力に切替' : 'サイズ計算に切替'}
+                  </button>
+                </div>
+
+                {usePosSize ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-gray-400 text-xs mb-1">ロット数</label>
+                        <input type="number" step="0.01" min="0" placeholder="例: 0.10" value={lotSize} onChange={e=>setLotSize(e.target.value)} className={inp} />
+                      </div>
+                      <div>
+                        <label className="block text-gray-400 text-xs mb-1">Pip価値 ($/lot)</label>
+                        <input type="number" step="0.01" min="0" placeholder="例: 10.00" value={pipValue} onChange={e=>setPipValue(e.target.value)} className={inp} />
+                      </div>
+                    </div>
+                    <p className="text-gray-600 text-xs">通常 FX: $10/lot。USD/JPY は現在レートで変動します</p>
+                    {hasResult && result.usingPos && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">
+                          <div className="text-gray-500 text-xs">リスク額</div>
+                          <div className="text-red-300 font-mono font-bold">-${result.riskAmt.toFixed(2)}</div>
+                          <div className="text-gray-600 text-xs">{result.riskPct.toFixed(2)}% of 残高</div>
+                        </div>
+                        <div className="bg-emerald-950/40 border border-emerald-800/50 rounded-lg px-3 py-2">
+                          <div className="text-gray-500 text-xs">リワード額</div>
+                          <div className="text-emerald-300 font-mono font-bold">+${result.rewardAmt.toFixed(2)}</div>
+                          <div className="text-gray-600 text-xs">{(result.rewardAmt/metrics.currentBalance*100).toFixed(2)}% of 残高</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-gray-400 text-xs mb-1">リスク金額 ($)</label>
+                    <input type="number" step="0.01" min="0.01"
+                      placeholder={`例: ${(metrics.currentBalance*settings.maxRiskPerTradePct/100).toFixed(2)}`}
+                      value={manualRisk} onChange={e=>setManualRisk(e.target.value)} className={inp} />
+                    {manualRisk && !isNaN(parseFloat(manualRisk)) && (
+                      <p className="text-gray-500 text-xs mt-1">残高比: {(parseFloat(manualRisk)/metrics.currentBalance*100).toFixed(2)}%</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {result?.error && (
+                <div className="bg-red-950 border border-red-700 rounded-lg px-4 py-3 text-red-300 text-sm">⚠️ {result.error}</div>
+              )}
+            </div>
+
+            {/* ── Results visual ── */}
+            <div className="bg-gray-800 rounded-xl p-6">
+              {!hasResult ? (
+                <div className="flex flex-col items-center justify-center h-full gap-3 text-center py-10">
+                  <div className="text-5xl">📐</div>
+                  <p className="text-gray-500 text-sm">価格レベルとポジションサイズを<br/>入力すると自動で計算されます</p>
+                </div>
+              ) : (
+                <div className="space-y-4 slide-in">
+                  <h3 className="text-sm font-bold text-white">
+                    {pair&&<span className="text-gray-400 mr-2">{pair}</span>}
+                    {direction==='long'?'▲ ロング':'▼ ショート'}
+                  </h3>
+                  <PriceLadder result={result} />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Rule Checks ── */}
+          {hasResult && (
+            <div className="bg-gray-800 rounded-xl p-6 space-y-4 fade-in">
+              <h3 className="text-base font-bold text-white">📋 エントリールール判定</h3>
+              <div className="space-y-2">
+                {result.checks.map(chk => (
+                  <div key={chk.key} className={`rounded-lg px-4 py-3 border ${chk.ok?'bg-emerald-950/40 border-emerald-800':'bg-red-950/40 border-red-800'}`}>
+                    <div className="flex items-start gap-3">
+                      <span className="text-base mt-0.5">{chk.ok?'✅':'❌'}</span>
+                      <div className="flex-1">
+                        <div className={`text-sm font-medium ${chk.ok?'text-emerald-300':'text-red-300'}`}>{chk.label}</div>
+                        {chk.detail&&<div className="text-xs text-red-400 mt-0.5">{chk.detail}</div>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className={`rounded-xl p-5 border-2 text-center ${result.allOk?'bg-emerald-950 border-emerald-500':'bg-red-950 border-red-500'}`}>
+                <div className="text-3xl mb-1">{result.allOk?'✅':'🚨'}</div>
+                <div className={`text-xl font-bold ${result.allOk?'text-emerald-300':'text-red-300'}`}>
+                  {result.allOk?'エントリー可能です':'ルール違反あり — エントリー不可'}
+                </div>
+                <div className="text-sm text-gray-400 mt-1">
+                  {result.allOk
+                    ? `RR 1:${result.rr.toFixed(2)} ｜ リスク $${result.riskAmt.toFixed(2)} (${result.riskPct.toFixed(1)}%) ｜ リワード $${result.rewardAmt.toFixed(2)}`
+                    : `${result.checks.filter(c=>!c.ok).length} 項目が未達です。修正後にエントリーしてください。`}
+                </div>
+              </div>
+
+              {onPrefillTrade && (
+                <div className="flex gap-3 pt-1">
+                  <button onClick={()=>onPrefillTrade({pair,direction,rr:result.rr,riskAmt:result.riskAmt,isReal:true})}
+                    className="flex-1 bg-blue-700 hover:bg-blue-600 text-white rounded-lg py-2.5 text-sm font-semibold transition-colors">
+                    📝 リアルトレードとして記録
+                  </button>
+                  <button onClick={()=>onPrefillTrade({pair,direction,rr:result.rr,riskAmt:result.riskAmt,isReal:false})}
+                    className="flex-1 bg-indigo-700 hover:bg-indigo-600 text-white rounded-lg py-2.5 text-sm font-semibold transition-colors">
+                    🎮 デモトレードとして記録
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // TRADE FORM
+    // ══════════════════════════════════════════════════════════════════════
+    const EMPTY_FORM = (prefill) => ({
+      date: todayStr(), pair: prefill?.pair||'', result:'win',
+      pnl:'', rr: prefill?.rr ? parseFloat(prefill.rr).toFixed(2) : '',
+      commission:'', ruleCompliant:true, notes:'', pending:false,
+    });
+
+    const TradeForm = ({ onAdd, onCancel, editTrade, prefill, isDemo }) => {
+      const [form, setForm] = useState(() => {
+        if (editTrade) {
+          return {
+            ...editTrade,
+            pnl:        Math.abs(editTrade.pnl||0).toString(),
+            commission: (editTrade.commission||0).toString(),
+            rr:         editTrade.rr>0 ? editTrade.rr.toString() : '',
+            pending:    editTrade.status === 'pending',
+          };
+        }
+        return EMPTY_FORM(prefill);
+      });
+      const [error, setError] = useState('');
+      const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+      const pnlVal  = parseFloat(form.pnl);
+      const commVal = parseFloat(form.commission) || 0;
+      const grossPnl = form.pending ? 0 : (form.result==='loss' ? -Math.abs(pnlVal) : Math.abs(pnlVal));
+      const netVal  = grossPnl - commVal;
+
+      const handleSubmit = (e) => {
+        e.preventDefault(); setError('');
+        if (!form.pair.trim()) { setError('通貨ペア / 銘柄を入力してください'); return; }
+        if (!form.pending) {
+          if (isNaN(pnlVal)||pnlVal<=0) { setError('損益額に正の数値を入力してください'); return; }
+        }
+        onAdd({
+          id:           editTrade?.id || uid(),
+          date:         form.date,
+          pair:         form.pair.trim().toUpperCase(),
+          result:       form.pending ? 'pending' : form.result,
+          pnl:          form.pending ? 0 : (form.result==='loss'?-Math.abs(pnlVal):Math.abs(pnlVal)),
+          commission:   commVal,
+          rr:           parseFloat(form.rr)||0,
+          ruleCompliant:form.ruleCompliant,
+          notes:        form.notes.trim(),
+          status:       form.pending ? 'pending' : 'closed',
+        });
+      };
+
+      const inp    = "w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500";
+      const accent = isDemo ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-blue-600 hover:bg-blue-500';
+
+      return (
+        <form onSubmit={handleSubmit} className="bg-gray-800 rounded-xl p-6 space-y-4 fade-in">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              {editTrade&&editTrade.status==='pending' ? '⏳ 結果を記録' : editTrade ? '✏️ 編集' : isDemo ? '🎮 デモ記録' : '➕ 新規記録'}
+              {isDemo&&<span className="text-xs bg-indigo-800 text-indigo-300 px-2 py-0.5 rounded-full">DEMO</span>}
+            </h3>
+            {/* Pending toggle (only for new trades or existing pending) */}
+            {(!editTrade || editTrade.status==='pending') && (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={form.pending} onChange={e=>set('pending',e.target.checked)} className="w-4 h-4 rounded accent-amber-500" />
+                <span className="text-amber-400 text-xs font-medium">⏳ 未決済として保存</span>
+              </label>
+            )}
+          </div>
+
+          {error&&<div className="bg-red-900/50 border border-red-600 text-red-300 text-sm rounded-lg px-4 py-2">{error}</div>}
+
+          {form.pending && (
+            <div className="bg-amber-950/50 border border-amber-700 rounded-lg px-4 py-2 text-amber-300 text-xs">
+              ⏳ 未決済として保存します。あとで「結果を記録」ボタンから損益を更新できます。
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-gray-400 text-xs mb-1">日付</label>
+              <input type="date" value={form.date} onChange={e=>set('date',e.target.value)} className={inp} />
+            </div>
+            <div>
+              <label className="block text-gray-400 text-xs mb-1">通貨ペア / 銘柄</label>
+              <input type="text" placeholder="例: USD/JPY" value={form.pair} onChange={e=>set('pair',e.target.value)} className={inp} />
+            </div>
+          </div>
+
+          {/* P&L section — hidden when pending */}
+          {!form.pending && (
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-gray-400 text-xs mb-1">結果</label>
+                <select value={form.result} onChange={e=>set('result',e.target.value)} className={inp}>
+                  <option value="win">✅ 勝ち (Win)</option>
+                  <option value="loss">❌ 負け (Loss)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-gray-400 text-xs mb-1">粗損益 ($)</label>
+                <input type="number" step="0.01" min="0" placeholder="0.00" value={form.pnl} onChange={e=>set('pnl',e.target.value)} className={inp} />
+              </div>
+              <div>
+                <label className="block text-gray-400 text-xs mb-1 flex items-center justify-between">
+                  <span>手数料 ($) <span className="text-gray-600">スプレッド含む</span></span>
+                </label>
+                <input type="number" step="0.01" min="0" placeholder="0.00" value={form.commission} onChange={e=>set('commission',e.target.value)} className={inp} />
+              </div>
+            </div>
+          )}
+
+          {/* Net P&L preview */}
+          {!form.pending && !isNaN(pnlVal) && pnlVal > 0 && (
+            <div className={`flex items-center justify-between rounded-lg px-4 py-2.5 ${netVal>=0?'bg-emerald-950/40 border border-emerald-800':'bg-red-950/40 border border-red-800'}`}>
+              <span className="text-gray-400 text-xs">純損益 (手数料差引後)</span>
+              <span className={`font-mono font-bold ${netVal>=0?'text-emerald-300':'text-red-300'}`}>
+                {fmt$(netVal)}
+                {commVal > 0 && <span className="text-gray-500 font-normal text-xs ml-2">(手数料: -${commVal.toFixed(2)})</span>}
+              </span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-gray-400 text-xs mb-1">RR比 <span className="text-gray-600">(例: 2 → 1:2)</span></label>
+              <input type="number" step="0.1" min="0" placeholder="2.0" value={form.rr} onChange={e=>set('rr',e.target.value)} className={inp} />
+            </div>
+            <div className="flex items-end">
+              <label className="flex items-center gap-3 cursor-pointer pb-2">
+                <input type="checkbox" checked={form.ruleCompliant} onChange={e=>set('ruleCompliant',e.target.checked)} className="w-4 h-4 rounded accent-blue-500" />
+                <span className="text-sm text-gray-200">エントリールール遵守</span>
+                {!form.ruleCompliant&&<span className="text-yellow-400 text-xs">⚠️ 違反</span>}
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-400 text-xs mb-1">メモ / 振り返り <span className="text-gray-600">(任意)</span></label>
+            <textarea rows={2} placeholder="エントリー根拠、早期決済の理由など..." value={form.notes} onChange={e=>set('notes',e.target.value)} className={`${inp} resize-none`} />
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button type="submit" className={`flex-1 ${accent} text-white rounded-lg py-2.5 text-sm font-semibold transition-colors`}>
+              {editTrade&&editTrade.status==='pending'?'結果を確定する':editTrade?'更新する':'記録する'}
+            </button>
+            {onCancel&&(
+              <button type="button" onClick={onCancel} className="px-6 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg py-2.5 text-sm transition-colors">
+                キャンセル
+              </button>
+            )}
+          </div>
+        </form>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // TRADE TABLE
+    // ══════════════════════════════════════════════════════════════════════
+    const TradeTable = ({ trades, month, onEdit, onDelete, isDemo }) => {
+      const rows = trades
+        .filter(t => t.date.startsWith(month))
+        .sort((a,b) => {
+          // pending first, then by date desc
+          if (a.status==='pending' && b.status!=='pending') return -1;
+          if (b.status==='pending' && a.status!=='pending') return 1;
+          return b.date.localeCompare(a.date);
+        });
+
+      const hasCommission = rows.some(t=>(t.commission||0)>0);
+
+      return (
+        <div className="bg-gray-800 rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-700 flex items-center justify-between">
+            <h3 className="font-bold text-white text-sm flex items-center gap-2">
+              📋 {isDemo?'デモ':'リアル'}トレード履歴
+              {isDemo&&<span className="text-xs bg-indigo-800 text-indigo-300 px-2 py-0.5 rounded-full">DEMO</span>}
+            </h3>
+            <div className="flex items-center gap-3">
+              {rows.some(t=>t.status==='pending')&&<span className="text-amber-400 text-xs">⏳ 未決済あり</span>}
+              <span className="text-gray-500 text-xs bg-gray-700 px-2 py-0.5 rounded-full">{rows.length} 件</span>
+            </div>
+          </div>
+
+          {rows.length===0 ? (
+            <div className="p-10 text-center text-gray-500 text-sm">この月のデータがありません</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-gray-500 text-xs bg-gray-900/40">
+                    <th className="text-left px-4 py-3">日付</th>
+                    <th className="text-left px-4 py-3">ペア</th>
+                    <th className="text-center px-4 py-3">状態</th>
+                    <th className="text-right px-4 py-3">粗損益</th>
+                    <th className="text-right px-4 py-3">手数料</th>
+                    <th className="text-right px-4 py-3">純損益</th>
+                    <th className="text-center px-4 py-3">RR</th>
+                    <th className="text-center px-4 py-3">ルール</th>
+                    <th className="text-left px-4 py-3">メモ</th>
+                    <th className="px-4 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((t, i) => {
+                    const isPending = t.status==='pending';
+                    const comm      = t.commission||0;
+                    const nPnl      = netPnl(t);
+                    const grossPnl  = t.pnl||0;
+
+                    return (
+                      <tr key={t.id} className={`border-t border-gray-700/40 transition-colors ${isPending?'pending-row':i%2===1?'bg-gray-900/20':''} hover:bg-gray-700/25`}>
+                        <td className="px-4 py-3 text-gray-400 text-xs tabular-nums">{fmtDate(t.date)}</td>
+                        <td className="px-4 py-3 font-medium text-white">{t.pair}</td>
+                        <td className="px-4 py-3 text-center">
+                          {isPending ? (
+                            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-900/60 text-amber-400">⏳ 未決済</span>
+                          ) : (
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${t.result==='win'?'bg-emerald-900/60 text-emerald-400':'bg-red-900/60 text-red-400'}`}>
+                              {t.result==='win'?'勝':'負'}
+                            </span>
+                          )}
+                        </td>
+                        <td className={`px-4 py-3 text-right font-mono text-sm ${isPending?'text-gray-600':grossPnl>=0?'text-gray-300':'text-gray-300'}`}>
+                          {isPending ? '—' : fmt$(grossPnl)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono text-xs text-orange-400">
+                          {comm>0 ? `-$${comm.toFixed(2)}` : <span className="text-gray-700">—</span>}
+                        </td>
+                        <td className={`px-4 py-3 text-right font-mono font-semibold ${isPending?'text-gray-600':nPnl>=0?'text-emerald-400':'text-red-400'}`}>
+                          {isPending ? <span className="text-amber-500 text-xs">記録待ち</span> : fmt$(nPnl)}
+                        </td>
+                        <td className="px-4 py-3 text-center text-gray-400 text-xs tabular-nums">
+                          {t.rr>0?`1:${t.rr.toFixed(1)}`:<span className="text-gray-600">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-center text-base">{t.ruleCompliant?'✅':'⚠️'}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs max-w-[130px] truncate">{t.notes||<span className="text-gray-700">—</span>}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-2 whitespace-nowrap">
+                            {isPending ? (
+                              <button onClick={()=>onEdit(t)} className="text-amber-500 hover:text-amber-300 text-xs font-medium transition-colors">結果を記録</button>
+                            ) : (
+                              <button onClick={()=>onEdit(t)} className="text-gray-500 hover:text-blue-400 text-xs transition-colors">編集</button>
+                            )}
+                            <button onClick={()=>onDelete(t.id)} className="text-gray-600 hover:text-red-400 text-xs transition-colors">削除</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+
+                {/* Month totals row */}
+                {rows.some(t=>t.status!=='pending') && (
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-600 bg-gray-900/60 text-xs font-semibold">
+                      <td colSpan={3} className="px-4 py-3 text-gray-400">月次合計</td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-300">
+                        {fmt$(rows.filter(r=>r.status!=='pending').reduce((s,t)=>s+(t.pnl||0),0))}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-orange-400">
+                        {(() => { const c=rows.reduce((s,t)=>s+(t.commission||0),0); return c>0?`-$${c.toFixed(2)}`:'—'; })()}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono">
+                        {(() => { const n=rows.filter(r=>r.status!=='pending').reduce((s,t)=>s+netPnl(t),0); return <span className={n>=0?'text-emerald-400':'text-red-400'}>{fmt$(n)}</span>; })()}
+                      </td>
+                      <td colSpan={4}></td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ── Trade Tab Content ─────────────────────────────────────────────────
+    const TradeTabContent = ({ trades, onAddTrade, onUpdateTrade, onDeleteTrade, settings, initialBalance, month, isDemo, prefill, clearPrefill }) => {
+      const [showForm,  setShowForm]  = useState(!!prefill);
+      const [editTrade, setEditTrade] = useState(null);
+
+      useEffect(() => { if (prefill) setShowForm(true); }, [prefill]);
+
+      const handleAdd = useCallback(async (trade) => {
+        if (editTrade) await onUpdateTrade(trade);
+        else           await onAddTrade(trade);
+        setEditTrade(null); setShowForm(false); clearPrefill?.();
+      }, [editTrade, onAddTrade, onUpdateTrade, clearPrefill]);
+
+      const handleEdit   = useCallback((trade) => { setEditTrade(trade); setShowForm(true); window.scrollTo({top:0,behavior:'smooth'}); }, []);
+      const handleDelete = useCallback(async (id) => { if(window.confirm('削除しますか？')) await onDeleteTrade(id); }, [onDeleteTrade]);
+
+      const metrics = useMemo(()=>calcMetrics(trades, initialBalance, settings, month), [trades, initialBalance, settings, month]);
+
+      const kpi = {
+        compliance: kpiStat(metrics.complianceRate, settings.minComplianceRate),
+        winRate:    kpiStat(metrics.winRate,         settings.minWinRate),
+        rr:         kpiStat(metrics.avgRR,           settings.minRR),
+        pnl:        kpiStat(metrics.monthNetPnL,     metrics.monthTarget),
+      };
+
+      return (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPICard label="ルール遵守率" priority displayValue={metrics.complianceRate!==null?`${metrics.complianceRate.toFixed(1)}%`:'—'} targetLabel={`${settings.minComplianceRate}%以上`} status={kpi.compliance} />
+            <KPICard label="勝率" displayValue={metrics.winRate!==null?`${metrics.winRate.toFixed(1)}%`:'—'} targetLabel={`${settings.minWinRate}%以上`} status={kpi.winRate} sub={metrics.total>0?`${metrics.wins}勝 ${metrics.losses}負`:''} />
+            <KPICard label="平均 RR" displayValue={metrics.avgRR!==null?`1:${metrics.avgRR.toFixed(2)}`:'—'} targetLabel={`1:${settings.minRR.toFixed(1)}以上`} status={kpi.rr} />
+            <KPICard label="今月純損益" displayValue={metrics.total>0?fmt$(metrics.monthNetPnL):'$0.00'} targetLabel={`$${metrics.monthTarget.toFixed(0)}`} status={kpi.pnl} />
+          </div>
+
+          {/* Commission row */}
+          {metrics.monthCommission > 0 && (
+            <div className="bg-gray-800 rounded-xl px-5 py-3 flex items-center gap-6 text-sm">
+              <span className="text-gray-500 text-xs">今月の手数料:</span>
+              <span className="text-orange-400 font-mono font-semibold">-${metrics.monthCommission.toFixed(2)}</span>
+              <span className="text-gray-600">|</span>
+              <span className="text-gray-500 text-xs">粗利益比:</span>
+              <span className="text-orange-400 font-mono">{metrics.commissionRate.toFixed(1)}%</span>
+              <span className="text-gray-600">|</span>
+              <span className="text-gray-500 text-xs">平均/取引:</span>
+              <span className="text-orange-400 font-mono">${metrics.total>0?(metrics.monthCommission/metrics.total).toFixed(2):'—'}</span>
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <button onClick={()=>{ setEditTrade(null); clearPrefill?.(); setShowForm(v=>!v); }}
+              className={`${isDemo?'bg-indigo-600 hover:bg-indigo-500':'bg-blue-600 hover:bg-blue-500'} text-white rounded-lg px-5 py-2 text-sm font-semibold transition-colors flex items-center gap-2`}>
+              <span>＋</span> トレード記録
+            </button>
+          </div>
+
+          {showForm&&(
+            <TradeForm onAdd={handleAdd} onCancel={()=>{setShowForm(false);setEditTrade(null);clearPrefill?.();}} editTrade={editTrade} prefill={prefill} isDemo={isDemo} />
+          )}
+
+          <TradeTable trades={trades} month={month} onEdit={handleEdit} onDelete={handleDelete} isDemo={isDemo} />
+
+          <div className="bg-gray-800 rounded-xl p-6">
+            <h3 className="text-sm font-bold text-white mb-4">{isDemo?'🎮 デモ口座 資産推移':'📈 資産推移'}</h3>
+            <AssetChart trades={trades} initialBalance={initialBalance} color={isDemo?'#6366f1':'#10b981'} label={isDemo?'デモ残高':'口座残高'} />
+          </div>
+        </div>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SETTINGS FORM
+    // ══════════════════════════════════════════════════════════════════════
+    const SettingsForm = ({ settings, onSave }) => {
+      const [form, setForm] = useState({...settings});
+      const [saved, setSaved] = useState(false);
+      const set = (k,v) => setForm(f=>({...f,[k]:v}));
+      const inp = "w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none";
+      const sec = "text-gray-400 font-semibold text-xs uppercase tracking-widest mb-3";
+      const calc$ = (pct) => ((parseFloat(form.initialBalance)||0)*(parseFloat(pct)||0)/100).toFixed(2);
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        const p = (k,d) => Math.max(0.01, parseFloat(form[k])||d);
+        await onSave({
+          initialBalance:     Math.max(1, parseFloat(form.initialBalance)||1000),
+          monthlyTargetPct:   p('monthlyTargetPct',20),
+          dailyLossLimitPct:  p('dailyLossLimitPct',6),
+          monthlyDDLimitPct:  p('monthlyDDLimitPct',10),
+          minWinRate:         p('minWinRate',50),
+          minRR:              p('minRR',2.0),
+          minComplianceRate:  p('minComplianceRate',90),
+          maxRiskPerTradePct: p('maxRiskPerTradePct',2),
+          demoInitialBalance: Math.max(1, parseFloat(form.demoInitialBalance)||10000),
+        });
+        setSaved(true); setTimeout(()=>setSaved(false),2500);
+      };
+
+      return (
+        <form onSubmit={handleSubmit} className="max-w-lg space-y-5">
+          {saved&&<div className="bg-emerald-900/50 border border-emerald-600 text-emerald-300 text-sm rounded-xl px-4 py-3 fade-in">✅ 設定を保存しました</div>}
+
+          <div className="bg-gray-800 rounded-xl p-6 space-y-4">
+            <p className={sec}>💼 リアル口座</p>
+            {[{k:'initialBalance',label:'初期口座残高 ($)',step:'1'},{k:'monthlyTargetPct',label:'月次利益目標 (%)',step:'0.1',hint:true}].map(({k,label,step,hint})=>(
+              <div key={k}>
+                <label className="block text-gray-400 text-xs mb-1">{label}</label>
+                <input type="number" step={step} min="0.01" value={form[k]} onChange={e=>set(k,e.target.value)} className={inp} />
+                {hint&&<p className="text-gray-600 text-xs mt-1">→ 目標額: ${calc$(form.monthlyTargetPct)}</p>}
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-gray-800 rounded-xl p-6 space-y-4">
+            <p className={sec}>🔴 リスク上限</p>
+            {[
+              {k:'dailyLossLimitPct', label:'1日の損失上限 (%)'},
+              {k:'monthlyDDLimitPct', label:'月次最大ドローダウン (%)'},
+              {k:'maxRiskPerTradePct',label:'1トレード最大リスク (%) — エントリー判定で使用'},
+            ].map(({k,label})=>(
+              <div key={k}>
+                <label className="block text-gray-400 text-xs mb-1">{label}</label>
+                <input type="number" step="0.1" min="0.1" value={form[k]} onChange={e=>set(k,e.target.value)} className={inp} />
+                <p className="text-gray-600 text-xs mt-1">→ -${calc$(form[k])}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-gray-800 rounded-xl p-6 space-y-4">
+            <p className={sec}>📊 KPI 目標</p>
+            {[
+              {k:'minComplianceRate',label:'ルール遵守率 (%)',priority:true},
+              {k:'minWinRate',       label:'最低勝率 (%)'},
+              {k:'minRR',           label:'最低平均 RR (例: 2 → 1:2)',step:'0.1'},
+            ].map(({k,label,priority,step})=>(
+              <div key={k}>
+                <label className="block text-gray-400 text-xs mb-1">{label}{priority&&<span className="text-red-400 ml-1">●</span>}</label>
+                <input type="number" step={step||'1'} min="0.1" value={form[k]} onChange={e=>set(k,e.target.value)} className={inp} />
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-gray-800 rounded-xl p-6 space-y-4">
+            <p className={sec}>🎮 デモ口座</p>
+            <div>
+              <label className="block text-gray-400 text-xs mb-1">デモ初期残高 ($)</label>
+              <input type="number" step="1" min="1" value={form.demoInitialBalance} onChange={e=>set('demoInitialBalance',e.target.value)} className={inp} />
+            </div>
+          </div>
+
+          <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white rounded-xl py-3 text-sm font-semibold transition-colors">
+            設定を保存する
+          </button>
+        </form>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // DASHBOARD TAB
+    // ══════════════════════════════════════════════════════════════════════
+    const DashboardTab = ({ trades, demoTrades, settings, month }) => {
+      const metrics     = useMemo(()=>calcMetrics(trades,     settings.initialBalance,     settings, month),[trades,    settings,month]);
+      const demoMetrics = useMemo(()=>calcMetrics(demoTrades, settings.demoInitialBalance, settings, month),[demoTrades,settings,month]);
+
+      const kpi = {
+        compliance: kpiStat(metrics.complianceRate, settings.minComplianceRate),
+        winRate:    kpiStat(metrics.winRate,         settings.minWinRate),
+        rr:         kpiStat(metrics.avgRR,           settings.minRR),
+        dd:         metrics.total===0?'neutral':kpiStat(metrics.maxDD,-settings.monthlyDDLimitPct,false),
+        daily:      metrics.dailyLimitHit?'bad':(Math.abs(metrics.todayLoss)>0?'warn':'neutral'),
+      };
+
+      return (
+        <div className="space-y-5">
+          <AlertBanner metrics={metrics} settings={settings} />
+          <KGICard metrics={metrics} settings={settings} month={month} initialBalance={settings.initialBalance} />
+
+          <div>
+            <h2 className="text-gray-500 text-xs font-semibold uppercase tracking-widest mb-3">KPI スコアカード <span className="text-red-400">●</span> = 最重要</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <KPICard label="ルール遵守率" priority displayValue={metrics.complianceRate!==null?`${metrics.complianceRate.toFixed(1)}%`:'—'} targetLabel={`${settings.minComplianceRate}%以上`} status={kpi.compliance} />
+              <KPICard label="勝率" displayValue={metrics.winRate!==null?`${metrics.winRate.toFixed(1)}%`:'—'} targetLabel={`${settings.minWinRate}%以上`} status={kpi.winRate} sub={metrics.total>0?`${metrics.wins}勝 ${metrics.losses}負`:''} />
+              <KPICard label="平均 RR" displayValue={metrics.avgRR!==null?`1:${metrics.avgRR.toFixed(2)}`:'—'} targetLabel={`1:${settings.minRR.toFixed(1)}以上`} status={kpi.rr} />
+              <KPICard label="月次最大 DD" displayValue={metrics.total>0?`${metrics.maxDD.toFixed(1)}%`:'—'} targetLabel={`-${settings.monthlyDDLimitPct}%以内`} status={kpi.dd} />
+              <KPICard label="本日の損失" priority displayValue={metrics.todayLoss<0?fmt$(metrics.todayLoss):'$0.00'} targetLabel={`-$${metrics.dailyLossLimitAmt.toFixed(0)}以内`} status={kpi.daily} />
+            </div>
+          </div>
+
+          <CommissionPanel metrics={metrics} />
+
+          <div className="bg-gray-800 rounded-xl p-6">
+            <h2 className="text-sm font-bold text-white mb-4">📈 資産推移</h2>
+            <AssetChart trades={trades} initialBalance={settings.initialBalance} />
+          </div>
+
+          {demoTrades.length>0&&(
+            <div className="bg-gray-800 rounded-xl p-6">
+              <h2 className="text-sm font-bold text-white mb-4">🔄 リアル vs デモ 比較</h2>
+              <div className="grid grid-cols-2 gap-4">
+                {[
+                  {label:'リアル口座',m:metrics,    color:'text-emerald-400'},
+                  {label:'デモ口座',  m:demoMetrics,color:'text-indigo-400'},
+                ].map(({label,m,color})=>(
+                  <div key={label} className="bg-gray-700/50 rounded-lg p-4 space-y-1">
+                    <div className="text-gray-400 text-xs font-semibold">{label}</div>
+                    <div className={`text-xl font-bold font-mono ${color}`}>{fmt$(m.monthNetPnL)}</div>
+                    <div className="text-gray-500 text-xs">
+                      勝率: {m.winRate!==null?`${m.winRate.toFixed(1)}%`:'—'} ｜
+                      RR: {m.avgRR!==null?`1:${m.avgRR.toFixed(1)}`:'—'} ｜
+                      手数料: {m.monthCommission>0?`$${m.monthCommission.toFixed(2)}`:'—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              {label:'今月のトレード',value:`${metrics.total}`,sub:`${metrics.wins}勝 / ${metrics.losses}負`,color:'text-white'},
+              {label:'今月の純損益',  value:metrics.total>0?fmt$(metrics.monthNetPnL):'$0.00',sub:`粗利益: ${fmt$(metrics.monthGrossPnL)}`,color:metrics.monthNetPnL>=0?'text-emerald-400':'text-red-400'},
+              {label:'累計収益率',    value:fmtPct((metrics.currentBalance-settings.initialBalance)/settings.initialBalance*100),sub:`$${settings.initialBalance} → $${metrics.currentBalance.toFixed(2)}`,color:metrics.currentBalance>=settings.initialBalance?'text-emerald-400':'text-red-400'},
+            ].map(({label,value,sub,color})=>(
+              <div key={label} className="bg-gray-800 rounded-xl p-4">
+                <div className="text-gray-500 text-xs mb-1">{label}</div>
+                <div className={`text-2xl font-bold font-mono ${color}`}>{value}</div>
+                <div className="text-gray-600 text-xs mt-1">{sub}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // APP
+    // ══════════════════════════════════════════════════════════════════════
+    const TABS = [
+      {key:'dashboard',label:'📊 ダッシュボード'},
+      {key:'entry',    label:'🎯 エントリー判定'},
+      {key:'real',     label:'📝 リアルトレード'},
+      {key:'demo',     label:'🎮 デモトレード'},
+      {key:'settings', label:'⚙️ 設定'},
+    ];
+
+    const App = () => {
+      const [trades,     setTrades]     = useState([]);
+      const [demoTrades, setDemoTrades] = useState([]);
+      const [settings,   setSettings]   = useState(DEFAULT_SETTINGS);
+      const [tab,        setTab]        = useState('dashboard');
+      const [month,      setMonth]      = useState(thisMonth);
+      const [prefill,    setPrefill]    = useState(null);
+      const [loading,    setLoading]    = useState(true);
+      const [error,      setError]      = useState(null);
+
+      useEffect(() => {
+        Promise.all([
+          api.get('/api/trades?demo=false'),
+          api.get('/api/trades?demo=true'),
+          api.get('/api/settings')
+        ]).then(([t, dt, s]) => {
+          setTrades(t);
+          setDemoTrades(dt);
+          setSettings({...DEFAULT_SETTINGS, ...s});
+          setLoading(false);
+        }).catch(err => {
+          console.error(err);
+          setError(err.toString());
+          setLoading(false);
+        });
+      }, []);
+
+      const addTrade = async (trade, isDemo) => {
+        const newTrade = await api.post(`/api/trades?demo=${isDemo}`, trade);
+        if (isDemo) setDemoTrades(ts => [...ts, newTrade]);
+        else setTrades(ts => [...ts, newTrade]);
+      };
+
+      const updateTrade = async (trade, isDemo) => {
+        const updatedTrade = await api.put(`/api/trades/${trade.id}`, trade);
+        if (isDemo) setDemoTrades(ts => ts.map(t => t.id === trade.id ? updatedTrade : t));
+        else setTrades(ts => ts.map(t => t.id === trade.id ? updatedTrade : t));
+      };
+
+      const deleteTrade = async (id, isDemo) => {
+        await api.del(`/api/trades/${id}`);
+        if (isDemo) setDemoTrades(ts => ts.filter(t => t.id !== id));
+        else setTrades(ts => ts.filter(t => t.id !== id));
+      };
+
+      const saveSettings = async (newSettings) => {
+        const updatedSettings = await api.post('/api/settings', newSettings);
+        setSettings({...DEFAULT_SETTINGS, ...updatedSettings});
+      };
+      
+      const realMetrics = useMemo(()=>calcMetrics(trades,    settings.initialBalance,    settings,month),[trades,    settings,month]);
+      const demoMetrics = useMemo(()=>calcMetrics(demoTrades,settings.demoInitialBalance,settings,month),[demoTrades,settings,month]);
+
+      const monthOptions = useMemo(()=>{
+        const s=new Set([thisMonth()]);
+        [...trades,...demoTrades].forEach(t=>s.add(t.date.slice(0,7)));
+        return [...s].sort().reverse();
+      },[trades,demoTrades]);
+
+      const handlePrefill = useCallback((data)=>{ setPrefill(data); setTab(data.isReal?'real':'demo'); },[]);
+
+      if (loading) return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-white">Loading...</div>;
+      if (error) return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-red-500">Error: {error}</div>;
+
+      return (
+        <div className="min-h-screen bg-gray-950">
+          {/* ── Header ── */}
+          <header className="bg-gray-900 border-b border-gray-800 sticky top-0 z-20 shadow-xl">
+            <div className="max-w-7xl mx-auto px-4 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center text-sm">📈</div>
+                  <div>
+                    <h1 className="text-white font-bold text-sm">トレード KGI/KPI ダッシュボード</h1>
+                    <p className="text-gray-600 text-xs">{new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric',weekday:'short'})}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-5">
+                  {[
+                    {label:'リアル残高',val:realMetrics.currentBalance,base:settings.initialBalance,color:'text-emerald-400'},
+                    {label:'デモ残高',  val:demoMetrics.currentBalance,base:settings.demoInitialBalance,color:'text-indigo-400'},
+                  ].map(({label,val,base,color})=>(
+                    <div key={label} className="text-right hidden sm:block">
+                      <div className="text-gray-600 text-xs">{label}</div>
+                      <div className={`font-bold text-sm font-mono ${val>=base?color:'text-red-400'}`}>${val.toFixed(2)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <nav className="flex gap-1 mt-3 overflow-x-auto pb-1">
+                {TABS.map(({key,label})=>(
+                  <button key={key} onClick={()=>setTab(key)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${tab===key?'bg-blue-600 text-white':'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
+                    {label}
+                    {key==='real'&&realMetrics.pendingCount>0&&<span className="ml-1.5 bg-amber-500 text-gray-900 rounded-full text-xs w-4 h-4 inline-flex items-center justify-center font-bold">{realMetrics.pendingCount}</span>}
+                  </button>
+                ))}
+              </nav>
+            </div>
+          </header>
+
+          <main className="max-w-7xl mx-auto px-4 py-6">
+            {tab!=='settings'&&tab!=='entry'&&(
+              <div className="flex items-center gap-3 mb-5">
+                <label className="text-gray-500 text-xs">表示月:</label>
+                <select value={month} onChange={e=>setMonth(e.target.value)}
+                  className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none">
+                  {monthOptions.map(m=><option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+            )}
+
+            {tab==='dashboard'&&<DashboardTab trades={trades} demoTrades={demoTrades} settings={settings} month={month} />}
+            {tab==='entry'   &&<EntryChecker settings={settings} metrics={realMetrics} onPrefillTrade={handlePrefill} />}
+            {tab==='real'    &&<TradeTabContent trades={trades}     onAddTrade={(t)=>addTrade(t, false)} onUpdateTrade={(t)=>updateTrade(t, false)} onDeleteTrade={(id)=>deleteTrade(id, false)} settings={settings} initialBalance={settings.initialBalance}     month={month} isDemo={false} prefill={prefill?.isReal?prefill:null}    clearPrefill={()=>setPrefill(null)} />}
+            {tab==='demo'    &&<TradeTabContent trades={demoTrades} onAddTrade={(t)=>addTrade(t, true)} onUpdateTrade={(t)=>updateTrade(t, true)} onDeleteTrade={(id)=>deleteTrade(id, true)} settings={settings} initialBalance={settings.demoInitialBalance} month={month} isDemo={true}  prefill={prefill&&!prefill.isReal?prefill:null} clearPrefill={()=>setPrefill(null)} />}
+            {tab==='settings'&&<SettingsForm settings={settings} onSave={saveSettings} />}
+          </main>
+
+          <footer className="max-w-7xl mx-auto px-4 py-6 text-center text-gray-700 text-xs">
+            データはサーバーのデータベースに保存されます
+          </footer>
+        </div>
+      );
+    };
+
+    class ErrorBoundary extends React.Component {
+      constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+      static getDerivedStateFromError(error) { return { hasError: true, error }; }
+      render() {
+        if (this.state.hasError) {
+          return <div className="min-h-screen bg-gray-950 p-10 text-red-500 font-mono text-sm whitespace-pre-wrap">
+            React Rendering Error:<br/><br/>{this.state.error?.toString()}
+          </div>;
+        }
+        return this.props.children;
+      }
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<ErrorBoundary><App /></ErrorBoundary>);
+    {% endraw %}
+  </script>
+</body>
+</html>
