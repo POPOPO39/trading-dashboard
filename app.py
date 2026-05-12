@@ -226,11 +226,17 @@ def row_to_prediction(row):
         'category':       row['category'],
         'title':          row['title'],
         'betAmount':      row['bet_amount'],
-        'resultUsd':      row['result_usd'],
+        'resultUsd':      row['result_usd'],  # None = pending bet
         'rulePositiveEv': row['rule_positive_ev'],
         'ruleUsedEvCalc': row['rule_used_ev_calc'],
         'notes':          row['notes'] or '',
     }
+
+def parse_result_usd(data):
+    v = data.get('resultUsd')
+    if v is None or v == '':
+        return None
+    return float(v)
 
 @app.route('/api/prediction', methods=['GET'])
 def get_prediction_bets():
@@ -246,7 +252,7 @@ def add_prediction_bet():
         'category':         data.get('category', ''),
         'title':            data.get('title', ''),
         'bet_amount':       float(data.get('betAmount', 0)),
-        'result_usd':       float(data.get('resultUsd', 0)),
+        'result_usd':       parse_result_usd(data),
         'rule_positive_ev':  bool(data.get('rulePositiveEv', True)),
         'rule_used_ev_calc': bool(data.get('ruleUsedEvCalc', True)),
         'notes':            data.get('notes', ''),
@@ -262,7 +268,7 @@ def update_prediction_bet(bet_id):
         'category':         data.get('category', ''),
         'title':            data.get('title', ''),
         'bet_amount':       float(data.get('betAmount', 0)),
-        'result_usd':       float(data.get('resultUsd', 0)),
+        'result_usd':       parse_result_usd(data),
         'rule_positive_ev':  bool(data.get('rulePositiveEv', True)),
         'rule_used_ev_calc': bool(data.get('ruleUsedEvCalc', True)),
         'notes':            data.get('notes', ''),

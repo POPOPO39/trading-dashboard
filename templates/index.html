@@ -1539,11 +1539,16 @@
       });
       const set = (k,v) => setForm(f=>({...f,[k]:v}));
       const betUnder20 = parseFloat(form.betAmount||0) < 20;
+      const isPending = form.resultUsd === '' || form.resultUsd === null || form.resultUsd === undefined;
       const submit = () => {
-        if (!form.date||!form.title||form.betAmount===''||form.resultUsd==='') {
-          alert('日付・タイトル・ベット額・勝敗$を入力してください'); return;
+        if (!form.date||!form.title||form.betAmount==='') {
+          alert('日付・タイトル・ベット額を入力してください'); return;
         }
-        onSave({...form, id:form.id||uid(), betAmount:parseFloat(form.betAmount)||0, resultUsd:parseFloat(form.resultUsd)||0});
+        onSave({
+          ...form, id:form.id||uid(),
+          betAmount: parseFloat(form.betAmount)||0,
+          resultUsd: isPending ? null : parseFloat(form.resultUsd),
+        });
       };
       return (
         <div className="bg-gray-800 rounded-xl p-5 space-y-4 slide-in">
@@ -1568,9 +1573,12 @@
               {!betUnder20&&<p className="text-red-400 text-xs mt-0.5">⚠️ 20ドル以上はルール違反</p>}
             </div>
             <div>
-              <label className="text-gray-400 text-xs mb-1 block">勝敗 ($) — 負は−</label>
-              <input type="number" value={form.resultUsd} onChange={e=>set('resultUsd',e.target.value)} step="0.01" placeholder="+15.00"
-                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none"/>
+              <label className="text-gray-400 text-xs mb-1 block">
+                勝敗 ($) — 負は− <span className="text-gray-600">（空欄=ベット中）</span>
+              </label>
+              <input type="number" value={form.resultUsd ?? ''} onChange={e=>set('resultUsd',e.target.value)} step="0.01" placeholder="空欄でベット中"
+                className={`w-full rounded-lg px-3 py-2 text-sm border focus:outline-none ${isPending?'bg-amber-900/30 border-amber-600 text-amber-200 placeholder-amber-700 focus:border-amber-400':'bg-gray-700 border-gray-600 text-white focus:border-blue-500'}`}/>
+              {isPending&&<p className="text-amber-500 text-xs mt-0.5">🎯 ベット中として登録されます</p>}
             </div>
           </div>
           <div>
@@ -1612,15 +1620,18 @@
       const [deleting, setDeleting] = useState(null);
       const [calMonth, setCalMonth] = useState(thisMonth());
 
-      const monthBets = useMemo(()=>bets.filter(b=>b.date.startsWith(calMonth)),[bets,calMonth]);
-      const isCompliant = (b) => b.rulePositiveEv && b.ruleUsedEvCalc && b.betAmount < 20;
+      const monthBets     = useMemo(()=>bets.filter(b=>b.date.startsWith(calMonth)),[bets,calMonth]);
+      const pendingBets   = monthBets.filter(b=>b.resultUsd===null||b.resultUsd===undefined);
+      const settledBets   = monthBets.filter(b=>b.resultUsd!==null&&b.resultUsd!==undefined);
+      const isCompliant   = (b) => b.rulePositiveEv && b.ruleUsedEvCalc && b.betAmount < 20;
       const compliantCount  = monthBets.filter(isCompliant).length;
       const complianceRate  = monthBets.length>0 ? compliantCount/monthBets.length*100 : null;
-      const totalResult     = monthBets.reduce((s,b)=>s+b.resultUsd,0);
+      const totalResult     = settledBets.reduce((s,b)=>s+b.resultUsd,0);
       const totalBet        = monthBets.reduce((s,b)=>s+b.betAmount,0);
-      const winCount        = monthBets.filter(b=>b.resultUsd>0).length;
-      const winRate         = monthBets.length>0 ? winCount/monthBets.length*100 : null;
-      const allTimeResult   = bets.reduce((s,b)=>s+b.resultUsd,0);
+      const settledBet      = settledBets.reduce((s,b)=>s+b.betAmount,0);
+      const winCount        = settledBets.filter(b=>b.resultUsd>0).length;
+      const winRate         = settledBets.length>0 ? winCount/settledBets.length*100 : null;
+      const allTimeResult   = bets.filter(b=>b.resultUsd!==null&&b.resultUsd!==undefined).reduce((s,b)=>s+b.resultUsd,0);
       const allTimeBet      = bets.reduce((s,b)=>s+b.betAmount,0);
 
       const monthOpts = useMemo(()=>{
@@ -1637,12 +1648,12 @@
         { label:'ルール遵守率', value:complianceRate!==null?`${complianceRate.toFixed(1)}%`:'—',
           target:'100%', good:complianceRate===100, warn:complianceRate!==null&&complianceRate>=80,
           sub:monthBets.length>0?`${compliantCount}/${monthBets.length} ベット`:'' },
-        { label:'月次収支 ($)', value:monthBets.length>0?(totalResult>=0?`+$${totalResult.toFixed(2)}`:`-$${Math.abs(totalResult).toFixed(2)}`):'—',
+        { label:'月次収支 ($)', value:settledBets.length>0?(totalResult>=0?`+$${totalResult.toFixed(2)}`:`-$${Math.abs(totalResult).toFixed(2)}`):'—',
           target:'プラス維持', good:totalResult>0, warn:totalResult===0,
-          sub:monthBets.length>0?`総ベット: $${totalBet.toFixed(2)}`:'' },
+          sub:settledBets.length>0?`確定: $${settledBet.toFixed(2)} / 保留中: $${(totalBet-settledBet).toFixed(2)}`:'' },
         { label:'勝率', value:winRate!==null?`${winRate.toFixed(1)}%`:'—',
           target:'50%以上', good:winRate!==null&&winRate>=50, warn:winRate!==null&&winRate>=40,
-          sub:monthBets.length>0?`${winCount}勝 ${monthBets.length-winCount}負`:'' },
+          sub:settledBets.length>0?`${winCount}勝 ${settledBets.length-winCount}負 (確定のみ)`:'' },
       ];
 
       return (
@@ -1689,8 +1700,8 @@
           <div className="grid grid-cols-3 gap-4">
             {[
               { label:'累計ベット数',  value:`${bets.length} ベット`,  sub:`${new Set(bets.map(b=>b.category)).size} カテゴリ`, color:'text-white' },
-              { label:'累計収支 ($)',  value:allTimeResult>=0?`+$${allTimeResult.toFixed(2)}`:`-$${Math.abs(allTimeResult).toFixed(2)}`, sub:`総ベット: $${allTimeBet.toFixed(2)}`, color:allTimeResult>=0?'text-emerald-400':'text-red-400' },
-              { label:'累計 ROI',  value:allTimeBet>0?`${((allTimeResult/allTimeBet)*100).toFixed(1)}%`:'—', sub:'全期間', color:allTimeResult>=0?'text-emerald-400':'text-red-400' },
+              { label:'累計収支 ($)',  value:allTimeResult>=0?`+$${allTimeResult.toFixed(2)}`:`-$${Math.abs(allTimeResult).toFixed(2)}`, sub:`総ベット: $${allTimeBet.toFixed(2)}（確定分のみ）`, color:allTimeResult>=0?'text-emerald-400':'text-red-400' },
+              { label:'累計 ROI',  value:allTimeBet>0?`${((allTimeResult/allTimeBet)*100).toFixed(1)}%`:'—', sub:`ベット中: ${bets.filter(b=>b.resultUsd===null||b.resultUsd===undefined).length}件`, color:allTimeResult>=0?'text-emerald-400':'text-red-400' },
             ].map(c=>(
               <div key={c.label} className="bg-gray-800/40 rounded-xl p-4 border border-gray-700">
                 <div className="text-gray-500 text-xs mb-1">{c.label}</div>
@@ -1729,33 +1740,49 @@
 
           {/* Bet list */}
           <div className="bg-gray-800 rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-700">
+            <div className="px-4 py-3 border-b border-gray-700 flex items-center gap-3">
               <h3 className="text-white font-semibold text-sm">{calMonth} のベット ({monthBets.length})</h3>
+              {pendingBets.length>0&&(
+                <span className="bg-amber-500/20 border border-amber-500/40 text-amber-400 text-xs px-2 py-0.5 rounded-full font-medium">
+                  🎯 ベット中 {pendingBets.length}件
+                </span>
+              )}
             </div>
             {monthBets.length===0
               ? <div className="p-8 text-center text-gray-600 text-sm">この月のベットはありません</div>
               : <div className="divide-y divide-gray-700">
-                  {[...monthBets].sort((a,b)=>b.date.localeCompare(a.date)).map(b=>{
-                    const ok = isCompliant(b);
-                    const roi = b.betAmount>0 ? (b.resultUsd/b.betAmount*100) : 0;
+                  {[...monthBets].sort((a,b)=>{
+                    const aP = a.resultUsd===null||a.resultUsd===undefined;
+                    const bP = b.resultUsd===null||b.resultUsd===undefined;
+                    if(aP!==bP) return aP?-1:1;
+                    return b.date.localeCompare(a.date);
+                  }).map(b=>{
+                    const isPending = b.resultUsd===null||b.resultUsd===undefined;
+                    const ok  = isCompliant(b);
+                    const roi = !isPending && b.betAmount>0 ? (b.resultUsd/b.betAmount*100) : null;
                     return (
-                      <div key={b.id} className="px-4 py-3 hover:bg-gray-700/30 transition-colors">
+                      <div key={b.id} className={`px-4 py-3 transition-colors ${isPending?'bg-amber-950/20 hover:bg-amber-950/30':'hover:bg-gray-700/30'}`}>
                         <div className="flex items-center gap-3 flex-wrap">
                           <span className="text-gray-400 text-xs font-mono w-24">{fmtDate(b.date)}</span>
                           <span className="bg-gray-700 text-gray-300 text-xs px-2 py-0.5 rounded">{b.category}</span>
                           <span className="text-gray-200 text-xs flex-1 min-w-32 truncate">{b.title}</span>
                           <span className="text-gray-400 text-xs font-mono">ベット: ${b.betAmount.toFixed(2)}</span>
-                          <span className={`font-bold font-mono text-sm ${b.resultUsd>0?'text-emerald-400':b.resultUsd<0?'text-red-400':'text-gray-400'}`}>
-                            {b.resultUsd>=0?'+':''}{b.resultUsd.toFixed(2)}$
-                          </span>
-                          <span className={`text-xs font-mono ${roi>=0?'text-emerald-300':'text-red-300'}`}>
-                            ROI: {roi>=0?'+':''}{roi.toFixed(0)}%
-                          </span>
+                          {isPending
+                            ? <span className="bg-amber-500 text-gray-900 font-bold text-xs px-3 py-0.5 rounded-full animate-pulse">🎯 ベット中</span>
+                            : <>
+                                <span className={`font-bold font-mono text-sm ${b.resultUsd>0?'text-emerald-400':b.resultUsd<0?'text-red-400':'text-gray-400'}`}>
+                                  {b.resultUsd>=0?'+':''}{b.resultUsd.toFixed(2)}$
+                                </span>
+                                <span className={`text-xs font-mono ${roi>=0?'text-emerald-300':'text-red-300'}`}>
+                                  ROI: {roi>=0?'+':''}{roi.toFixed(0)}%
+                                </span>
+                              </>
+                          }
                           <span className={`text-xs px-2 py-0.5 rounded-full ${ok?'bg-emerald-900/60 text-emerald-300':'bg-red-900/60 text-red-300'}`}>
                             {ok?'✓ 遵守':'✗ 違反'}
                           </span>
                           <div className="ml-auto flex gap-2">
-                            <button onClick={()=>{setEditing(b);setShowForm(false);}} className="text-gray-500 hover:text-blue-400 text-xs px-2 py-1">編集</button>
+                            <button onClick={()=>{setEditing({...b,resultUsd:isPending?'':b.resultUsd});setShowForm(false);}} className="text-gray-500 hover:text-blue-400 text-xs px-2 py-1">編集</button>
                             <button onClick={()=>setDeleting(b.id)} className="text-gray-500 hover:text-red-400 text-xs px-2 py-1">削除</button>
                           </div>
                         </div>
@@ -1807,7 +1834,7 @@
         const add=(date,biz,amt)=>{if(!data[date])data[date]={};data[date][biz]=(data[date][biz]||0)+amt;};
         pokerSessions.filter(s=>s.date.startsWith(month)).forEach(s=>add(s.date,'poker',s.resultBb*s.bbSize));
         trades.filter(t=>t.date.startsWith(month)&&t.status!=='pending').forEach(t=>add(t.date,'invest',netPnl(t)));
-        predictionBets.filter(b=>b.date.startsWith(month)).forEach(b=>add(b.date,'predict',b.resultUsd));
+        predictionBets.filter(b=>b.date.startsWith(month)&&b.resultUsd!==null&&b.resultUsd!==undefined).forEach(b=>add(b.date,'predict',b.resultUsd));
         return data;
       },[pokerSessions,trades,predictionBets,month]);
 
