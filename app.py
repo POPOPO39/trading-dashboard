@@ -200,5 +200,82 @@ def delete_poker_session(session_id):
     supabase.table('poker_sessions').delete().eq('id', session_id).execute()
     return jsonify({'success': True})
 
+# --- Poker Daily Checkins ---
+
+def row_to_checkin(row):
+    return {'date': row['date'], 'todoGto': row['todo_gto']}
+
+@app.route('/api/poker/checkins', methods=['GET'])
+def get_poker_checkins():
+    res = supabase.table('poker_daily_checkins').select('*').execute()
+    return jsonify([row_to_checkin(r) for r in res.data])
+
+@app.route('/api/poker/checkins', methods=['POST'])
+def upsert_poker_checkin():
+    data = request.json
+    row = {'date': data['date'], 'todo_gto': bool(data.get('todoGto', False))}
+    res = supabase.table('poker_daily_checkins').upsert(row, on_conflict='date').execute()
+    return jsonify(row_to_checkin(res.data[0]))
+
+# --- Prediction Market Bets ---
+
+def row_to_prediction(row):
+    return {
+        'id':             row['id'],
+        'date':           row['date'],
+        'category':       row['category'],
+        'title':          row['title'],
+        'betAmount':      row['bet_amount'],
+        'resultUsd':      row['result_usd'],
+        'rulePositiveEv': row['rule_positive_ev'],
+        'ruleUsedEvCalc': row['rule_used_ev_calc'],
+        'notes':          row['notes'] or '',
+    }
+
+@app.route('/api/prediction', methods=['GET'])
+def get_prediction_bets():
+    res = supabase.table('prediction_bets').select('*').order('date').execute()
+    return jsonify([row_to_prediction(r) for r in res.data])
+
+@app.route('/api/prediction', methods=['POST'])
+def add_prediction_bet():
+    data = request.json
+    row = {
+        'id':               data['id'],
+        'date':             data['date'],
+        'category':         data.get('category', ''),
+        'title':            data.get('title', ''),
+        'bet_amount':       float(data.get('betAmount', 0)),
+        'result_usd':       float(data.get('resultUsd', 0)),
+        'rule_positive_ev':  bool(data.get('rulePositiveEv', True)),
+        'rule_used_ev_calc': bool(data.get('ruleUsedEvCalc', True)),
+        'notes':            data.get('notes', ''),
+    }
+    res = supabase.table('prediction_bets').insert(row).execute()
+    return jsonify(row_to_prediction(res.data[0])), 201
+
+@app.route('/api/prediction/<bet_id>', methods=['PUT'])
+def update_prediction_bet(bet_id):
+    data = request.json
+    row = {
+        'date':             data['date'],
+        'category':         data.get('category', ''),
+        'title':            data.get('title', ''),
+        'bet_amount':       float(data.get('betAmount', 0)),
+        'result_usd':       float(data.get('resultUsd', 0)),
+        'rule_positive_ev':  bool(data.get('rulePositiveEv', True)),
+        'rule_used_ev_calc': bool(data.get('ruleUsedEvCalc', True)),
+        'notes':            data.get('notes', ''),
+    }
+    res = supabase.table('prediction_bets').update(row).eq('id', bet_id).execute()
+    if not res.data:
+        return jsonify({'error': 'Bet not found'}), 404
+    return jsonify(row_to_prediction(res.data[0]))
+
+@app.route('/api/prediction/<bet_id>', methods=['DELETE'])
+def delete_prediction_bet(bet_id):
+    supabase.table('prediction_bets').delete().eq('id', bet_id).execute()
+    return jsonify({'success': True})
+
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

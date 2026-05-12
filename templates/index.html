@@ -1293,17 +1293,44 @@
       );
     };
 
-    const PokerPage = ({ sessions, onAdd, onUpdate, onDelete }) => {
+    const POKER_DAILY_TODOS = [
+      { key:'hands30', label:'毎日30ハンドプレイする',  auto:true },
+      { key:'gto',     label:'1ハンドGTO分析する',       auto:false },
+    ];
+
+    const PokerPage = ({ sessions, checkins, onAdd, onUpdate, onDelete, onCheckin }) => {
       const [showForm, setShowForm] = useState(false);
       const [editing,  setEditing]  = useState(null);
       const [deleting, setDeleting] = useState(null);
       const [calMonth, setCalMonth] = useState(thisMonth());
 
-      const monthSessions = useMemo(()=>sessions.filter(s=>s.date.startsWith(calMonth)),[sessions,calMonth]);
+      const monthSessions  = useMemo(()=>sessions.filter(s=>s.date.startsWith(calMonth)),[sessions,calMonth]);
       const totalCompliant = monthSessions.filter(s=>s.ruleNoEmotion&&s.ruleStopTilted&&s.ruleNoRandomCalls).length;
       const complianceRate = monthSessions.length>0 ? totalCompliant/monthSessions.length*100 : null;
       const totalBb  = monthSessions.reduce((s,x)=>s+x.resultBb,0);
       const totalUsd = monthSessions.reduce((s,x)=>s+x.resultBb*x.bbSize,0);
+
+      // All-time totals
+      const allHandsTotal = sessions.reduce((s,x)=>s+x.hands,0);
+      const allBbTotal    = sessions.reduce((s,x)=>s+x.resultBb,0);
+      const allUsdTotal   = sessions.reduce((s,x)=>s+x.resultBb*x.bbSize,0);
+
+      // Today's TODO
+      const todayHandsCount = sessions.filter(s=>s.date===todayStr()).reduce((s,x)=>s+x.hands,0);
+      const todayCheckin    = checkins[todayStr()] || {};
+      const todayTodos = [
+        { key:'hands30', done: todayHandsCount>=30, auto:true,  label:'毎日30ハンドプレイする', detail:`今日: ${todayHandsCount}/30 hands` },
+        { key:'gto',     done: !!todayCheckin.todoGto, auto:false, label:'1ハンドGTO分析する' },
+      ];
+
+      // Monthly TODO completion rate
+      const monthDates      = [...new Set(monthSessions.map(s=>s.date))];
+      const completedDays   = monthDates.filter(date=>{
+        const dayHands = sessions.filter(s=>s.date===date).reduce((s,x)=>s+x.hands,0);
+        return dayHands>=30 && (checkins[date]||{}).todoGto;
+      }).length;
+      const todoRate = monthDates.length>0 ? completedDays/monthDates.length*100 : null;
+
       const monthOpts = useMemo(()=>{
         const s=new Set([thisMonth()]); sessions.forEach(x=>s.add(x.date.slice(0,7)));
         return [...s].sort().reverse();
@@ -1313,11 +1340,17 @@
         if (editing) { await onUpdate(data); setEditing(null); }
         else { await onAdd(data); setShowForm(false); }
       };
+      const handleGtoToggle = async () => {
+        await onCheckin({ date: todayStr(), todoGto: !todayCheckin.todoGto });
+      };
 
       const kpiCards = [
         { label:'ルール遵守率', value: complianceRate!==null?`${complianceRate.toFixed(1)}%`:'—',
           target:'100%', good:complianceRate===100, warn:complianceRate!==null&&complianceRate>=66,
           sub: monthSessions.length>0?`${totalCompliant}/${monthSessions.length} セッション`:'' },
+        { label:'TODO達成率', value: todoRate!==null?`${todoRate.toFixed(1)}%`:'—',
+          target:'100%', good:todoRate===100, warn:todoRate!==null&&todoRate>=50,
+          sub: monthDates.length>0?`${completedDays}/${monthDates.length} 日達成`:'' },
         { label:'月次収支 (BB)', value: monthSessions.length>0?`${totalBb>=0?'+':''}${totalBb.toFixed(1)} BB`:'—',
           target:'プラス維持', good:totalBb>0, warn:totalBb===0, sub:`${monthSessions.length} セッション` },
         { label:'月次収支 ($)', value: monthSessions.length>0?(totalUsd>=0?`+$${totalUsd.toFixed(2)}`:`-$${Math.abs(totalUsd).toFixed(2)}`): '—',
@@ -1342,6 +1375,30 @@
             </div>
           </div>
 
+          {/* Today's Daily TODO */}
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+            <h3 className="text-gray-300 font-semibold text-xs uppercase tracking-widest mb-3">
+              ✅ 今日のデイリーTODO — {todayStr()}
+            </h3>
+            <div className="space-y-2">
+              {todayTodos.map(t=>(
+                <div key={t.key} className="flex items-center gap-3">
+                  {t.auto
+                    ? <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${t.done?'bg-emerald-600 text-white':'bg-gray-700 text-gray-500'}`}>{t.done?'✓':'○'}</span>
+                    : <button onClick={handleGtoToggle}
+                        className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 transition-colors ${t.done?'bg-emerald-600 text-white hover:bg-emerald-500':'bg-gray-700 text-gray-500 hover:bg-gray-600'}`}>
+                        {t.done?'✓':'○'}
+                      </button>
+                  }
+                  <span className={`text-sm ${t.done?'text-gray-200':'text-gray-500'}`}>{t.label}</span>
+                  {t.detail&&<span className="text-xs text-gray-600 ml-1">{t.detail}</span>}
+                  {t.auto&&<span className="text-xs text-gray-700">（自動）</span>}
+                  {!t.auto&&<span className="text-xs text-gray-700">（クリックで切替）</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* Rules + TODO */}
           <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-4 grid sm:grid-cols-2 gap-4">
             <div>
@@ -1355,7 +1412,7 @@
               </div>
             </div>
             <div>
-              <h4 className="text-gray-300 font-semibold text-xs uppercase tracking-widest mb-3">📌 TODO</h4>
+              <h4 className="text-gray-300 font-semibold text-xs uppercase tracking-widest mb-3">📌 TODO（週次）</h4>
               <ul className="space-y-1 text-xs text-gray-400 list-disc list-inside">
                 <li>プリフロップ範囲をスタディする（週1回以上）</li>
                 <li>セッション後に振り返りメモを書く</li>
@@ -1364,8 +1421,23 @@
             </div>
           </div>
 
-          {/* KPI */}
+          {/* All-time totals */}
           <div className="grid grid-cols-3 gap-4">
+            {[
+              { label:'累計ハンド数', value:`${allHandsTotal.toLocaleString()} hands`, sub:`${sessions.length} セッション`, color:'text-white' },
+              { label:'累計収支 (BB)', value:`${allBbTotal>=0?'+':''}${allBbTotal.toFixed(1)} BB`, sub:'全期間合計', color:allBbTotal>=0?'text-emerald-400':'text-red-400' },
+              { label:'累計収支 ($)',  value:allUsdTotal>=0?`+$${allUsdTotal.toFixed(2)}`:`-$${Math.abs(allUsdTotal).toFixed(2)}`, sub:'全期間合計', color:allUsdTotal>=0?'text-emerald-400':'text-red-400' },
+            ].map(c=>(
+              <div key={c.label} className="bg-gray-800/40 rounded-xl p-4 border border-gray-700">
+                <div className="text-gray-500 text-xs mb-1">{c.label}</div>
+                <div className={`text-xl font-bold font-mono ${c.color}`}>{c.value}</div>
+                <div className="text-gray-600 text-xs mt-1">{c.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* KPI */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {kpiCards.map(c=>{
               const hasData = monthSessions.length>0;
               const border = c.good?'border-emerald-500':c.warn?'border-yellow-500':hasData?'border-red-500':'border-gray-700';
@@ -1450,6 +1522,269 @@
     };
 
     // ══════════════════════════════════════════════════════════════════════
+    // PREDICTION MARKET PAGE
+    // ══════════════════════════════════════════════════════════════════════
+    const PREDICT_RULES = [
+      { key:'rulePositiveEv',  label:'期待値がプラスのベットをした', auto:false },
+      { key:'ruleUsedEvCalc',  label:'ベットの前にAI等を使った期待値計算を実施した', auto:false },
+      { key:'ruleBetUnder20',  label:'一回のベット額20ドル未満', auto:true },
+    ];
+    const PREDICT_CATEGORIES = ['スポーツ','政治','経済','テクノロジー','エンタメ','その他'];
+
+    const PredictionBetForm = ({ bet, onSave, onCancel }) => {
+      const isEdit = !!bet;
+      const [form, setForm] = useState(bet || {
+        date:todayStr(), category:'スポーツ', title:'', betAmount:'', resultUsd:'',
+        rulePositiveEv:true, ruleUsedEvCalc:true, notes:'',
+      });
+      const set = (k,v) => setForm(f=>({...f,[k]:v}));
+      const betUnder20 = parseFloat(form.betAmount||0) < 20;
+      const submit = () => {
+        if (!form.date||!form.title||form.betAmount===''||form.resultUsd==='') {
+          alert('日付・タイトル・ベット額・勝敗$を入力してください'); return;
+        }
+        onSave({...form, id:form.id||uid(), betAmount:parseFloat(form.betAmount)||0, resultUsd:parseFloat(form.resultUsd)||0});
+      };
+      return (
+        <div className="bg-gray-800 rounded-xl p-5 space-y-4 slide-in">
+          <h3 className="text-white font-bold text-sm">{isEdit?'✏️ 編集':'➕ ベット登録'}</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <label className="text-gray-400 text-xs mb-1 block">日付</label>
+              <input type="date" value={form.date} onChange={e=>set('date',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none"/>
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs mb-1 block">カテゴリ</label>
+              <select value={form.category} onChange={e=>set('category',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none">
+                {PREDICT_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs mb-1 block">ベット額 ($)</label>
+              <input type="number" value={form.betAmount} onChange={e=>set('betAmount',e.target.value)} step="0.01" min="0" placeholder="10.00"
+                className={`w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border focus:outline-none ${betUnder20?'border-gray-600 focus:border-blue-500':'border-red-600 focus:border-red-500'}`}/>
+              {!betUnder20&&<p className="text-red-400 text-xs mt-0.5">⚠️ 20ドル以上はルール違反</p>}
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs mb-1 block">勝敗 ($) — 負は−</label>
+              <input type="number" value={form.resultUsd} onChange={e=>set('resultUsd',e.target.value)} step="0.01" placeholder="+15.00"
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none"/>
+            </div>
+          </div>
+          <div>
+            <label className="text-gray-400 text-xs mb-1 block">タイトル</label>
+            <input type="text" value={form.title} onChange={e=>set('title',e.target.value)} placeholder="例: チャンピオンズリーグ決勝 マンC vs レアル"
+              className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none"/>
+          </div>
+          <div>
+            <label className="text-gray-400 text-xs mb-2 block">ルールチェック</label>
+            <div className="space-y-2">
+              {PREDICT_RULES.filter(r=>!r.auto).map(r=>(
+                <label key={r.key} className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={form[r.key]} onChange={e=>set(r.key,e.target.checked)} className="w-4 h-4 rounded accent-emerald-500"/>
+                  <span className={`text-sm ${form[r.key]?'text-gray-200':'text-red-400'}`}>{r.label}</span>
+                </label>
+              ))}
+              <div className="flex items-center gap-2 opacity-70">
+                <span className={`w-4 h-4 rounded text-xs flex items-center justify-center flex-shrink-0 ${betUnder20?'bg-emerald-700 text-white':'bg-red-900 text-red-300'}`}>{betUnder20?'✓':'✗'}</span>
+                <span className={`text-sm ${betUnder20?'text-gray-400':'text-red-400'}`}>一回のベット額20ドル未満（自動: ${parseFloat(form.betAmount||0).toFixed(2)}）</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <label className="text-gray-400 text-xs mb-1 block">メモ</label>
+            <textarea value={form.notes} onChange={e=>set('notes',e.target.value)} rows={2} placeholder="根拠・分析メモなど"
+              className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none resize-none"/>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={onCancel} className="px-4 py-2 text-gray-400 hover:text-white text-sm">キャンセル</button>
+            <button onClick={submit} className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-5 py-2 rounded-lg text-sm">{isEdit?'保存':'登録'}</button>
+          </div>
+        </div>
+      );
+    };
+
+    const PredictionPage = ({ bets, onAdd, onUpdate, onDelete }) => {
+      const [showForm, setShowForm] = useState(false);
+      const [editing,  setEditing]  = useState(null);
+      const [deleting, setDeleting] = useState(null);
+      const [calMonth, setCalMonth] = useState(thisMonth());
+
+      const monthBets = useMemo(()=>bets.filter(b=>b.date.startsWith(calMonth)),[bets,calMonth]);
+      const isCompliant = (b) => b.rulePositiveEv && b.ruleUsedEvCalc && b.betAmount < 20;
+      const compliantCount  = monthBets.filter(isCompliant).length;
+      const complianceRate  = monthBets.length>0 ? compliantCount/monthBets.length*100 : null;
+      const totalResult     = monthBets.reduce((s,b)=>s+b.resultUsd,0);
+      const totalBet        = monthBets.reduce((s,b)=>s+b.betAmount,0);
+      const winCount        = monthBets.filter(b=>b.resultUsd>0).length;
+      const winRate         = monthBets.length>0 ? winCount/monthBets.length*100 : null;
+      const allTimeResult   = bets.reduce((s,b)=>s+b.resultUsd,0);
+      const allTimeBet      = bets.reduce((s,b)=>s+b.betAmount,0);
+
+      const monthOpts = useMemo(()=>{
+        const s=new Set([thisMonth()]); bets.forEach(b=>s.add(b.date.slice(0,7)));
+        return [...s].sort().reverse();
+      },[bets]);
+
+      const handleSave = async (data) => {
+        if (editing) { await onUpdate(data); setEditing(null); }
+        else { await onAdd(data); setShowForm(false); }
+      };
+
+      const kpiCards = [
+        { label:'ルール遵守率', value:complianceRate!==null?`${complianceRate.toFixed(1)}%`:'—',
+          target:'100%', good:complianceRate===100, warn:complianceRate!==null&&complianceRate>=80,
+          sub:monthBets.length>0?`${compliantCount}/${monthBets.length} ベット`:'' },
+        { label:'月次収支 ($)', value:monthBets.length>0?(totalResult>=0?`+$${totalResult.toFixed(2)}`:`-$${Math.abs(totalResult).toFixed(2)}`):'—',
+          target:'プラス維持', good:totalResult>0, warn:totalResult===0,
+          sub:monthBets.length>0?`総ベット: $${totalBet.toFixed(2)}`:'' },
+        { label:'勝率', value:winRate!==null?`${winRate.toFixed(1)}%`:'—',
+          target:'50%以上', good:winRate!==null&&winRate>=50, warn:winRate!==null&&winRate>=40,
+          sub:monthBets.length>0?`${winCount}勝 ${monthBets.length-winCount}負`:'' },
+      ];
+
+      return (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-white font-bold text-lg">🔮 予測市場</h2>
+              <p className="text-gray-500 text-xs mt-0.5">ベット管理 ＆ KPI</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <select value={calMonth} onChange={e=>setCalMonth(e.target.value)}
+                className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none">
+                {monthOpts.map(m=><option key={m} value={m}>{m}</option>)}
+              </select>
+              <button onClick={()=>{setShowForm(true);setEditing(null);}}
+                className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-4 py-2 rounded-lg text-sm">＋ 登録</button>
+            </div>
+          </div>
+
+          {/* Rules + TODO */}
+          <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-4 grid sm:grid-cols-2 gap-4">
+            <div>
+              <h3 className="text-gray-300 font-semibold text-xs uppercase tracking-widest mb-3">📋 予測市場 ルール</h3>
+              <div className="space-y-1.5">
+                {PREDICT_RULES.map((r,i)=>(
+                  <div key={r.key} className="flex items-start gap-2 text-sm text-gray-300">
+                    <span className="text-cyan-400 font-bold text-xs mt-0.5">{i+1}.</span>
+                    {r.label}{r.auto&&<span className="text-xs text-gray-600">（自動判定）</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h4 className="text-gray-300 font-semibold text-xs uppercase tracking-widest mb-3">📌 TODO</h4>
+              <ul className="space-y-1 text-xs text-gray-400 list-disc list-inside">
+                <li>各ベット前にAIで期待値を計算する</li>
+                <li>過去ベットの結果を月次で振り返る</li>
+                <li>カテゴリ別の勝率を分析してエッジを特定する</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* All-time totals */}
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { label:'累計ベット数',  value:`${bets.length} ベット`,  sub:`${new Set(bets.map(b=>b.category)).size} カテゴリ`, color:'text-white' },
+              { label:'累計収支 ($)',  value:allTimeResult>=0?`+$${allTimeResult.toFixed(2)}`:`-$${Math.abs(allTimeResult).toFixed(2)}`, sub:`総ベット: $${allTimeBet.toFixed(2)}`, color:allTimeResult>=0?'text-emerald-400':'text-red-400' },
+              { label:'累計 ROI',  value:allTimeBet>0?`${((allTimeResult/allTimeBet)*100).toFixed(1)}%`:'—', sub:'全期間', color:allTimeResult>=0?'text-emerald-400':'text-red-400' },
+            ].map(c=>(
+              <div key={c.label} className="bg-gray-800/40 rounded-xl p-4 border border-gray-700">
+                <div className="text-gray-500 text-xs mb-1">{c.label}</div>
+                <div className={`text-xl font-bold font-mono ${c.color}`}>{c.value}</div>
+                <div className="text-gray-600 text-xs mt-1">{c.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* KPI */}
+          <div className="grid grid-cols-3 gap-4">
+            {kpiCards.map(c=>{
+              const hasData = monthBets.length>0;
+              const border = c.good?'border-emerald-500':c.warn?'border-yellow-500':hasData?'border-red-500':'border-gray-700';
+              const textColor = c.good?'text-emerald-400':c.warn?'text-yellow-400':hasData?'text-red-400':'text-gray-400';
+              const icon = c.good?'✅':c.warn?'⚠️':hasData?'🚨':'—';
+              return (
+                <div key={c.label} className={`bg-gray-800 rounded-xl p-4 border-l-4 ${border}`}>
+                  <div className="flex items-start justify-between mb-2">
+                    <span className="text-gray-400 text-xs">{c.label}</span>
+                    <span className="text-base">{icon}</span>
+                  </div>
+                  <div className={`text-2xl font-bold font-mono ${textColor}`}>{c.value}</div>
+                  <div className="text-gray-500 text-xs mt-1">目標: {c.target}</div>
+                  {c.sub&&<div className="text-gray-600 text-xs">{c.sub}</div>}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Form */}
+          {(showForm||editing)&&(
+            <PredictionBetForm bet={editing} onSave={handleSave}
+              onCancel={()=>{setShowForm(false);setEditing(null);}}/>
+          )}
+
+          {/* Bet list */}
+          <div className="bg-gray-800 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-700">
+              <h3 className="text-white font-semibold text-sm">{calMonth} のベット ({monthBets.length})</h3>
+            </div>
+            {monthBets.length===0
+              ? <div className="p-8 text-center text-gray-600 text-sm">この月のベットはありません</div>
+              : <div className="divide-y divide-gray-700">
+                  {[...monthBets].sort((a,b)=>b.date.localeCompare(a.date)).map(b=>{
+                    const ok = isCompliant(b);
+                    const roi = b.betAmount>0 ? (b.resultUsd/b.betAmount*100) : 0;
+                    return (
+                      <div key={b.id} className="px-4 py-3 hover:bg-gray-700/30 transition-colors">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className="text-gray-400 text-xs font-mono w-24">{fmtDate(b.date)}</span>
+                          <span className="bg-gray-700 text-gray-300 text-xs px-2 py-0.5 rounded">{b.category}</span>
+                          <span className="text-gray-200 text-xs flex-1 min-w-32 truncate">{b.title}</span>
+                          <span className="text-gray-400 text-xs font-mono">ベット: ${b.betAmount.toFixed(2)}</span>
+                          <span className={`font-bold font-mono text-sm ${b.resultUsd>0?'text-emerald-400':b.resultUsd<0?'text-red-400':'text-gray-400'}`}>
+                            {b.resultUsd>=0?'+':''}{b.resultUsd.toFixed(2)}$
+                          </span>
+                          <span className={`text-xs font-mono ${roi>=0?'text-emerald-300':'text-red-300'}`}>
+                            ROI: {roi>=0?'+':''}{roi.toFixed(0)}%
+                          </span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${ok?'bg-emerald-900/60 text-emerald-300':'bg-red-900/60 text-red-300'}`}>
+                            {ok?'✓ 遵守':'✗ 違反'}
+                          </span>
+                          <div className="ml-auto flex gap-2">
+                            <button onClick={()=>{setEditing(b);setShowForm(false);}} className="text-gray-500 hover:text-blue-400 text-xs px-2 py-1">編集</button>
+                            <button onClick={()=>setDeleting(b.id)} className="text-gray-500 hover:text-red-400 text-xs px-2 py-1">削除</button>
+                          </div>
+                        </div>
+                        {b.notes&&<div className="text-gray-600 text-xs mt-1 ml-24 truncate">{b.notes}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+            }
+          </div>
+
+          {/* Delete confirm */}
+          {deleting&&(
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+              <div className="bg-gray-800 rounded-xl p-6 space-y-4 max-w-sm w-full">
+                <h3 className="text-white font-bold">削除確認</h3>
+                <p className="text-gray-400 text-sm">このベットを削除しますか？</p>
+                <div className="flex gap-3 justify-end">
+                  <button onClick={()=>setDeleting(null)} className="text-gray-400 hover:text-white px-4 py-2 text-sm">キャンセル</button>
+                  <button onClick={()=>{onDelete(deleting);setDeleting(null);}} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold">削除</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
     // CALENDAR PAGE
     // ══════════════════════════════════════════════════════════════════════
     const BUSINESSES = [
@@ -1460,7 +1795,7 @@
       {key:'toreka',  label:'🃠 トレカ',    textPos:'text-yellow-300', textNeg:'text-yellow-400', bg:'bg-yellow-900/40'},
     ];
 
-    const CalendarPage = ({ pokerSessions, trades }) => {
+    const CalendarPage = ({ pokerSessions, trades, predictionBets }) => {
       const [month,       setMonth]       = useState(thisMonth());
       const [filters,     setFilters]     = useState(new Set(['poker','invest']));
       const [selectedDay, setSelectedDay] = useState(null);
@@ -1472,8 +1807,9 @@
         const add=(date,biz,amt)=>{if(!data[date])data[date]={};data[date][biz]=(data[date][biz]||0)+amt;};
         pokerSessions.filter(s=>s.date.startsWith(month)).forEach(s=>add(s.date,'poker',s.resultBb*s.bbSize));
         trades.filter(t=>t.date.startsWith(month)&&t.status!=='pending').forEach(t=>add(t.date,'invest',netPnl(t)));
+        predictionBets.filter(b=>b.date.startsWith(month)).forEach(b=>add(b.date,'predict',b.resultUsd));
         return data;
-      },[pokerSessions,trades,month]);
+      },[pokerSessions,trades,predictionBets,month]);
 
       const [year,mon] = month.split('-').map(Number);
       const firstDay   = new Date(year,mon-1,1).getDay();
@@ -1489,8 +1825,9 @@
         const s=new Set([thisMonth()]);
         pokerSessions.forEach(x=>s.add(x.date.slice(0,7)));
         trades.forEach(x=>s.add(x.date.slice(0,7)));
+        predictionBets.forEach(x=>s.add(x.date.slice(0,7)));
         return [...s].sort().reverse();
-      },[pokerSessions,trades]);
+      },[pokerSessions,trades,predictionBets]);
 
       const selectedDateStr = selectedDay ? getDayStr(selectedDay) : null;
       const selectedData    = selectedDateStr ? dayData[selectedDateStr] : null;
@@ -1626,6 +1963,7 @@
     const SECTIONS = [
       {key:'trading', label:'📈 投資・トレード'},
       {key:'poker',   label:'🃏 Poker'},
+      {key:'predict', label:'🔮 予測市場'},
       {key:'calendar',label:'📅 カレンダー'},
     ];
 
@@ -1633,6 +1971,8 @@
       const [trades,         setTrades]         = useState([]);
       const [demoTrades,     setDemoTrades]      = useState([]);
       const [pokerSessions,  setPokerSessions]   = useState([]);
+      const [pokerCheckins,  setPokerCheckins]   = useState({});
+      const [predictionBets, setPredictionBets]  = useState([]);
       const [settings,       setSettings]        = useState(DEFAULT_SETTINGS);
       const [section,        setSection]         = useState('trading');
       const [tab,            setTab]             = useState('dashboard');
@@ -1649,11 +1989,17 @@
           api.get('/api/trades?demo=true'),
           api.get('/api/settings'),
           api.get('/api/poker'),
-        ]).then(([t, dt, s, pk]) => {
+          api.get('/api/poker/checkins'),
+          api.get('/api/prediction'),
+        ]).then(([t, dt, s, pk, ck, pb]) => {
           setTrades(t);
           setDemoTrades(dt);
           setSettings({...DEFAULT_SETTINGS, ...s});
           setPokerSessions(pk);
+          const ckMap = {};
+          ck.forEach(c => { ckMap[c.date] = c; });
+          setPokerCheckins(ckMap);
+          setPredictionBets(pb);
           setLoading(false);
           // If server has no trades yet, check for local data to migrate
           if (t.length === 0 && dt.length === 0) {
@@ -1725,6 +2071,22 @@
       const deletePokerSession = async (id) => {
         await api.del(`/api/poker/${id}`);
         setPokerSessions(ps => ps.filter(p => p.id !== id));
+      };
+      const upsertPokerCheckin = async (data) => {
+        const c = await api.post('/api/poker/checkins', data);
+        setPokerCheckins(ck => ({...ck, [c.date]: c}));
+      };
+      const addPredictionBet = async (bet) => {
+        const b = await api.post('/api/prediction', bet);
+        setPredictionBets(bs => [...bs, b]);
+      };
+      const updatePredictionBet = async (bet) => {
+        const b = await api.put(`/api/prediction/${bet.id}`, bet);
+        setPredictionBets(bs => bs.map(x => x.id===bet.id ? b : x));
+      };
+      const deletePredictionBet = async (id) => {
+        await api.del(`/api/prediction/${id}`);
+        setPredictionBets(bs => bs.filter(x => x.id !== id));
       };
       
       const realMetrics = useMemo(()=>calcMetrics(trades,    settings.initialBalance,    settings,month),[trades,    settings,month]);
@@ -1823,12 +2185,18 @@
             </>}
             {/* Poker section */}
             {section==='poker'&&(
-              <PokerPage sessions={pokerSessions}
-                onAdd={addPokerSession} onUpdate={updatePokerSession} onDelete={deletePokerSession}/>
+              <PokerPage sessions={pokerSessions} checkins={pokerCheckins}
+                onAdd={addPokerSession} onUpdate={updatePokerSession} onDelete={deletePokerSession}
+                onCheckin={upsertPokerCheckin}/>
+            )}
+            {/* Prediction section */}
+            {section==='predict'&&(
+              <PredictionPage bets={predictionBets}
+                onAdd={addPredictionBet} onUpdate={updatePredictionBet} onDelete={deletePredictionBet}/>
             )}
             {/* Calendar section */}
             {section==='calendar'&&(
-              <CalendarPage pokerSessions={pokerSessions} trades={trades}/>
+              <CalendarPage pokerSessions={pokerSessions} trades={trades} predictionBets={predictionBets}/>
             )}
           </main>
 
