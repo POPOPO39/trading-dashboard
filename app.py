@@ -1,6 +1,9 @@
 from flask import Flask, render_template, request, jsonify
 from supabase import create_client, Client
+from dotenv import load_dotenv
 import os
+
+load_dotenv()  # .env ファイルを自動読み込み
 
 app = Flask(__name__)
 
@@ -136,6 +139,66 @@ def update_settings():
     else:
         updated = supabase.table('settings').insert(row).execute()
     return jsonify(row_to_settings(updated.data[0]))
+
+# --- Poker API ---
+
+def row_to_poker(row):
+    return {
+        'id':                 row['id'],
+        'date':               row['date'],
+        'hands':              row['hands'],
+        'bbSize':             row['bb_size'],
+        'resultBb':           row['result_bb'],
+        'ruleNoEmotion':      row['rule_no_emotion'],
+        'ruleStopTilted':     row['rule_stop_tilted'],
+        'ruleNoRandomCalls':  row['rule_no_random_calls'],
+        'notes':              row['notes'] or '',
+    }
+
+@app.route('/api/poker', methods=['GET'])
+def get_poker_sessions():
+    res = supabase.table('poker_sessions').select('*').order('date').execute()
+    return jsonify([row_to_poker(r) for r in res.data])
+
+@app.route('/api/poker', methods=['POST'])
+def add_poker_session():
+    data = request.json
+    row = {
+        'id':                  data['id'],
+        'date':                data['date'],
+        'hands':               int(data.get('hands', 0)),
+        'bb_size':             float(data.get('bbSize', 1)),
+        'result_bb':           float(data.get('resultBb', 0)),
+        'rule_no_emotion':     bool(data.get('ruleNoEmotion', True)),
+        'rule_stop_tilted':    bool(data.get('ruleStopTilted', True)),
+        'rule_no_random_calls':bool(data.get('ruleNoRandomCalls', True)),
+        'notes':               data.get('notes', ''),
+    }
+    res = supabase.table('poker_sessions').insert(row).execute()
+    return jsonify(row_to_poker(res.data[0])), 201
+
+@app.route('/api/poker/<session_id>', methods=['PUT'])
+def update_poker_session(session_id):
+    data = request.json
+    row = {
+        'date':                data['date'],
+        'hands':               int(data.get('hands', 0)),
+        'bb_size':             float(data.get('bbSize', 1)),
+        'result_bb':           float(data.get('resultBb', 0)),
+        'rule_no_emotion':     bool(data.get('ruleNoEmotion', True)),
+        'rule_stop_tilted':    bool(data.get('ruleStopTilted', True)),
+        'rule_no_random_calls':bool(data.get('ruleNoRandomCalls', True)),
+        'notes':               data.get('notes', ''),
+    }
+    res = supabase.table('poker_sessions').update(row).eq('id', session_id).execute()
+    if not res.data:
+        return jsonify({'error': 'Session not found'}), 404
+    return jsonify(row_to_poker(res.data[0]))
+
+@app.route('/api/poker/<session_id>', methods=['DELETE'])
+def delete_poker_session(session_id):
+    supabase.table('poker_sessions').delete().eq('id', session_id).execute()
+    return jsonify({'success': True})
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

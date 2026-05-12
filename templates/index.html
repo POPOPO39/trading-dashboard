@@ -1226,6 +1226,393 @@
     };
 
     // ══════════════════════════════════════════════════════════════════════
+    // POKER PAGE
+    // ══════════════════════════════════════════════════════════════════════
+    const POKER_RULES = [
+      { key:'ruleNoEmotion',     label:'感情的なプレイをしなかった' },
+      { key:'ruleStopTilted',    label:'「イライラ」「退屈でコールしたい」を感じたらプレイをやめた' },
+      { key:'ruleNoRandomCalls', label:'適当なコールをしなかった' },
+    ];
+
+    const PokerSessionForm = ({ session, onSave, onCancel }) => {
+      const isEdit = !!session;
+      const [form, setForm] = useState(session || {
+        date: todayStr(), hands:'', bbSize:'', resultBb:'',
+        ruleNoEmotion:true, ruleStopTilted:true, ruleNoRandomCalls:true, notes:'',
+      });
+      const set = (k,v) => setForm(f=>({...f,[k]:v}));
+      const submit = () => {
+        if (!form.date || form.hands==='' || form.bbSize==='' || form.resultBb==='') {
+          alert('日付・ハンド数・BB額・勝敗BBを入力してください'); return;
+        }
+        onSave({ ...form, id: form.id||uid(), hands:parseInt(form.hands)||0,
+          bbSize:parseFloat(form.bbSize)||0, resultBb:parseFloat(form.resultBb)||0 });
+      };
+      return (
+        <div className="bg-gray-800 rounded-xl p-5 space-y-4 slide-in">
+          <h3 className="text-white font-bold text-sm">{isEdit?'✏️ 編集':'➕ セッション追加'}</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              {label:'日付', type:'date', key:'date'},
+              {label:'ハンド数', type:'number', key:'hands', min:0, placeholder:'100'},
+              {label:'BB額 ($)', type:'number', key:'bbSize', step:'0.01', min:0, placeholder:'1.00'},
+              {label:'勝敗 (BB) — 負は−', type:'number', key:'resultBb', step:'0.1', placeholder:'+10.5'},
+            ].map(f=>(
+              <div key={f.key}>
+                <label className="text-gray-400 text-xs mb-1 block">{f.label}</label>
+                <input type={f.type} value={form[f.key]} onChange={e=>set(f.key,e.target.value)}
+                  min={f.min} step={f.step} placeholder={f.placeholder}
+                  className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none"/>
+              </div>
+            ))}
+          </div>
+          <div>
+            <label className="text-gray-400 text-xs mb-2 block">ルールチェック</label>
+            <div className="space-y-2">
+              {POKER_RULES.map(r=>(
+                <label key={r.key} className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={form[r.key]} onChange={e=>set(r.key,e.target.checked)}
+                    className="w-4 h-4 rounded accent-emerald-500"/>
+                  <span className={`text-sm ${form[r.key]?'text-gray-200':'text-red-400'}`}>{r.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-gray-400 text-xs mb-1 block">メモ</label>
+            <textarea value={form.notes} onChange={e=>set('notes',e.target.value)} rows={2} placeholder="気づき・反省点など"
+              className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none resize-none"/>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={onCancel} className="px-4 py-2 text-gray-400 hover:text-white text-sm">キャンセル</button>
+            <button onClick={submit} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-2 rounded-lg text-sm">
+              {isEdit?'保存':'登録'}
+            </button>
+          </div>
+        </div>
+      );
+    };
+
+    const PokerPage = ({ sessions, onAdd, onUpdate, onDelete }) => {
+      const [showForm, setShowForm] = useState(false);
+      const [editing,  setEditing]  = useState(null);
+      const [deleting, setDeleting] = useState(null);
+      const [calMonth, setCalMonth] = useState(thisMonth());
+
+      const monthSessions = useMemo(()=>sessions.filter(s=>s.date.startsWith(calMonth)),[sessions,calMonth]);
+      const totalCompliant = monthSessions.filter(s=>s.ruleNoEmotion&&s.ruleStopTilted&&s.ruleNoRandomCalls).length;
+      const complianceRate = monthSessions.length>0 ? totalCompliant/monthSessions.length*100 : null;
+      const totalBb  = monthSessions.reduce((s,x)=>s+x.resultBb,0);
+      const totalUsd = monthSessions.reduce((s,x)=>s+x.resultBb*x.bbSize,0);
+      const monthOpts = useMemo(()=>{
+        const s=new Set([thisMonth()]); sessions.forEach(x=>s.add(x.date.slice(0,7)));
+        return [...s].sort().reverse();
+      },[sessions]);
+
+      const handleSave = async (data) => {
+        if (editing) { await onUpdate(data); setEditing(null); }
+        else { await onAdd(data); setShowForm(false); }
+      };
+
+      const kpiCards = [
+        { label:'ルール遵守率', value: complianceRate!==null?`${complianceRate.toFixed(1)}%`:'—',
+          target:'100%', good:complianceRate===100, warn:complianceRate!==null&&complianceRate>=66,
+          sub: monthSessions.length>0?`${totalCompliant}/${monthSessions.length} セッション`:'' },
+        { label:'月次収支 (BB)', value: monthSessions.length>0?`${totalBb>=0?'+':''}${totalBb.toFixed(1)} BB`:'—',
+          target:'プラス維持', good:totalBb>0, warn:totalBb===0, sub:`${monthSessions.length} セッション` },
+        { label:'月次収支 ($)', value: monthSessions.length>0?(totalUsd>=0?`+$${totalUsd.toFixed(2)}`:`-$${Math.abs(totalUsd).toFixed(2)}`): '—',
+          target:'プラス維持', good:totalUsd>0, warn:totalUsd===0,
+          sub: monthSessions.length>0?`平均BB: $${(monthSessions.reduce((s,x)=>s+x.bbSize,0)/monthSessions.length).toFixed(2)}`:'' },
+      ];
+
+      return (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-white font-bold text-lg">🃏 Poker</h2>
+              <p className="text-gray-500 text-xs mt-0.5">セッション管理 ＆ KPI</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <select value={calMonth} onChange={e=>setCalMonth(e.target.value)}
+                className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none">
+                {monthOpts.map(m=><option key={m} value={m}>{m}</option>)}
+              </select>
+              <button onClick={()=>{setShowForm(true);setEditing(null);}}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-lg text-sm">＋ 登録</button>
+            </div>
+          </div>
+
+          {/* Rules + TODO */}
+          <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-4 grid sm:grid-cols-2 gap-4">
+            <div>
+              <h3 className="text-gray-300 font-semibold text-xs uppercase tracking-widest mb-3">📋 ポーカー ルール</h3>
+              <div className="space-y-1.5">
+                {POKER_RULES.map((r,i)=>(
+                  <div key={r.key} className="flex items-start gap-2 text-sm text-gray-300">
+                    <span className="text-emerald-400 font-bold text-xs mt-0.5">{i+1}.</span>{r.label}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h4 className="text-gray-300 font-semibold text-xs uppercase tracking-widest mb-3">📌 TODO</h4>
+              <ul className="space-y-1 text-xs text-gray-400 list-disc list-inside">
+                <li>プリフロップ範囲をスタディする（週1回以上）</li>
+                <li>セッション後に振り返りメモを書く</li>
+                <li>ハンドヒストリーを確認してリーク箇所を特定する</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* KPI */}
+          <div className="grid grid-cols-3 gap-4">
+            {kpiCards.map(c=>{
+              const hasData = monthSessions.length>0;
+              const border = c.good?'border-emerald-500':c.warn?'border-yellow-500':hasData?'border-red-500':'border-gray-700';
+              const textColor = c.good?'text-emerald-400':c.warn?'text-yellow-400':hasData?'text-red-400':'text-gray-400';
+              const icon = c.good?'✅':c.warn?'⚠️':hasData?'🚨':'—';
+              return (
+                <div key={c.label} className={`bg-gray-800 rounded-xl p-4 border-l-4 ${border}`}>
+                  <div className="flex items-start justify-between mb-2">
+                    <span className="text-gray-400 text-xs">{c.label}</span>
+                    <span className="text-base">{icon}</span>
+                  </div>
+                  <div className={`text-2xl font-bold font-mono ${textColor}`}>{c.value}</div>
+                  <div className="text-gray-500 text-xs mt-1">目標: {c.target}</div>
+                  {c.sub&&<div className="text-gray-600 text-xs">{c.sub}</div>}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Form */}
+          {(showForm||editing)&&(
+            <PokerSessionForm session={editing} onSave={handleSave}
+              onCancel={()=>{setShowForm(false);setEditing(null);}}/>
+          )}
+
+          {/* Session list */}
+          <div className="bg-gray-800 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-700">
+              <h3 className="text-white font-semibold text-sm">{calMonth} のセッション ({monthSessions.length})</h3>
+            </div>
+            {monthSessions.length===0
+              ? <div className="p-8 text-center text-gray-600 text-sm">この月のセッションはありません</div>
+              : <div className="divide-y divide-gray-700">
+                  {[...monthSessions].sort((a,b)=>b.date.localeCompare(a.date)).map(s=>{
+                    const usd = s.resultBb*s.bbSize;
+                    const allOk = s.ruleNoEmotion&&s.ruleStopTilted&&s.ruleNoRandomCalls;
+                    return (
+                      <div key={s.id} className="px-4 py-3 hover:bg-gray-700/30 transition-colors">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className="text-gray-400 text-xs font-mono w-24">{fmtDate(s.date)}</span>
+                          <span className="text-gray-300 text-xs">{s.hands} hands ｜ BB: ${s.bbSize}</span>
+                          <span className={`font-bold font-mono text-sm ${s.resultBb>0?'text-emerald-400':s.resultBb<0?'text-red-400':'text-gray-400'}`}>
+                            {s.resultBb>0?'+':''}{s.resultBb.toFixed(1)} BB
+                          </span>
+                          <span className={`font-mono text-xs ${usd>0?'text-emerald-300':usd<0?'text-red-300':'text-gray-500'}`}>
+                            ({usd>=0?'+':''}{usd.toFixed(2)}$)
+                          </span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${allOk?'bg-emerald-900/60 text-emerald-300':'bg-red-900/60 text-red-300'}`}>
+                            {allOk?'✓ ルール遵守':'✗ 違反あり'}
+                          </span>
+                          {!allOk&&<span className="text-red-400 text-xs">
+                            {[!s.ruleNoEmotion&&'感情的',!s.ruleStopTilted&&'離席失敗',!s.ruleNoRandomCalls&&'適当コール'].filter(Boolean).join(' / ')}
+                          </span>}
+                          <div className="ml-auto flex gap-2">
+                            <button onClick={()=>{setEditing(s);setShowForm(false);}} className="text-gray-500 hover:text-blue-400 text-xs px-2 py-1">編集</button>
+                            <button onClick={()=>setDeleting(s.id)} className="text-gray-500 hover:text-red-400 text-xs px-2 py-1">削除</button>
+                          </div>
+                        </div>
+                        {s.notes&&<div className="text-gray-600 text-xs mt-1 ml-24 truncate">{s.notes}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+            }
+          </div>
+
+          {/* Delete confirm */}
+          {deleting&&(
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+              <div className="bg-gray-800 rounded-xl p-6 space-y-4 max-w-sm w-full">
+                <h3 className="text-white font-bold">削除確認</h3>
+                <p className="text-gray-400 text-sm">このセッションを削除しますか？</p>
+                <div className="flex gap-3 justify-end">
+                  <button onClick={()=>setDeleting(null)} className="text-gray-400 hover:text-white px-4 py-2 text-sm">キャンセル</button>
+                  <button onClick={()=>{onDelete(deleting);setDeleting(null);}} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold">削除</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // CALENDAR PAGE
+    // ══════════════════════════════════════════════════════════════════════
+    const BUSINESSES = [
+      {key:'poker',   label:'🃏 Poker',    textPos:'text-purple-300', textNeg:'text-purple-400', bg:'bg-purple-900/40'},
+      {key:'invest',  label:'📈 投資',      textPos:'text-blue-300',   textNeg:'text-blue-400',   bg:'bg-blue-900/40'},
+      {key:'keiba',   label:'🐎 競馬',      textPos:'text-orange-300', textNeg:'text-orange-400', bg:'bg-orange-900/40'},
+      {key:'predict', label:'🔮 予測市場',  textPos:'text-cyan-300',   textNeg:'text-cyan-400',   bg:'bg-cyan-900/40'},
+      {key:'toreka',  label:'🃠 トレカ',    textPos:'text-yellow-300', textNeg:'text-yellow-400', bg:'bg-yellow-900/40'},
+    ];
+
+    const CalendarPage = ({ pokerSessions, trades }) => {
+      const [month,       setMonth]       = useState(thisMonth());
+      const [filters,     setFilters]     = useState(new Set(['poker','invest']));
+      const [selectedDay, setSelectedDay] = useState(null);
+
+      const toggleFilter = (key) => setFilters(f=>{const n=new Set(f);n.has(key)?n.delete(key):n.add(key);return n;});
+
+      const dayData = useMemo(()=>{
+        const data={};
+        const add=(date,biz,amt)=>{if(!data[date])data[date]={};data[date][biz]=(data[date][biz]||0)+amt;};
+        pokerSessions.filter(s=>s.date.startsWith(month)).forEach(s=>add(s.date,'poker',s.resultBb*s.bbSize));
+        trades.filter(t=>t.date.startsWith(month)&&t.status!=='pending').forEach(t=>add(t.date,'invest',netPnl(t)));
+        return data;
+      },[pokerSessions,trades,month]);
+
+      const [year,mon] = month.split('-').map(Number);
+      const firstDay   = new Date(year,mon-1,1).getDay();
+      const daysInMon  = new Date(year,mon,0).getDate();
+      const cells = [];
+      for(let i=0;i<firstDay;i++) cells.push(null);
+      for(let d=1;d<=daysInMon;d++) cells.push(d);
+
+      const getDayStr = (d) => `${month}-${String(d).padStart(2,'0')}`;
+      const getMonthTotal = (biz) => Object.values(dayData).reduce((s,bd)=>s+(bd[biz]||0),0);
+
+      const monthOpts = useMemo(()=>{
+        const s=new Set([thisMonth()]);
+        pokerSessions.forEach(x=>s.add(x.date.slice(0,7)));
+        trades.forEach(x=>s.add(x.date.slice(0,7)));
+        return [...s].sort().reverse();
+      },[pokerSessions,trades]);
+
+      const selectedDateStr = selectedDay ? getDayStr(selectedDay) : null;
+      const selectedData    = selectedDateStr ? dayData[selectedDateStr] : null;
+
+      return (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-white font-bold text-lg">📅 カレンダー</h2>
+              <p className="text-gray-500 text-xs mt-0.5">月次損益カレンダー（日付をクリックで詳細）</p>
+            </div>
+            <select value={month} onChange={e=>{setMonth(e.target.value);setSelectedDay(null);}}
+              className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none">
+              {monthOpts.map(m=><option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+
+          {/* Filter buttons */}
+          <div className="flex gap-2 flex-wrap">
+            {BUSINESSES.map(b=>(
+              <button key={b.key} onClick={()=>toggleFilter(b.key)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
+                  filters.has(b.key)?'bg-gray-700 border-gray-500 text-white':'border-gray-700 text-gray-600 hover:text-gray-400'
+                }`}>{b.label}</button>
+            ))}
+          </div>
+
+          {/* Month totals bar */}
+          <div className="flex gap-3 flex-wrap">
+            {BUSINESSES.filter(b=>filters.has(b.key)).map(b=>{
+              const total = getMonthTotal(b.key);
+              const tc = total>=0?b.textPos:'text-red-400';
+              return (
+                <div key={b.key} className={`flex items-center gap-2 ${b.bg} rounded-lg px-3 py-2`}>
+                  <span className="text-gray-400 text-xs">{b.label}</span>
+                  <span className={`font-bold font-mono text-sm ${tc}`}>{total>=0?'+':''}{total.toFixed(2)}$</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Calendar grid */}
+          <div className="bg-gray-800 rounded-xl overflow-hidden">
+            <div className="grid grid-cols-7 border-b border-gray-700">
+              {['日','月','火','水','木','金','土'].map((d,i)=>(
+                <div key={d} className={`py-2 text-center text-xs font-medium ${i===0?'text-red-400':i===6?'text-blue-400':'text-gray-500'}`}>{d}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7">
+              {cells.map((d,i)=>{
+                if(d===null) return <div key={`e${i}`} className="min-h-20 border-r border-b border-gray-700/40"/>;
+                const dateStr = getDayStr(d);
+                const bd = dayData[dateStr]||{};
+                const dow = i%7;
+                const isToday = dateStr===todayStr();
+                const isSelected = selectedDay===d;
+                const activeBiz = BUSINESSES.filter(b=>filters.has(b.key)&&bd[b.key]!==undefined);
+                const dayTotal  = activeBiz.reduce((s,b)=>s+(bd[b.key]||0),0);
+                return (
+                  <div key={d} onClick={()=>setSelectedDay(isSelected?null:d)}
+                    className={`min-h-20 border-r border-b border-gray-700/40 p-1.5 cursor-pointer transition-colors
+                      ${isSelected?'bg-blue-900/30':'hover:bg-gray-700/30'}`}>
+                    <div className={`text-xs font-medium mb-1 w-6 h-6 flex items-center justify-center rounded-full
+                      ${isToday?'bg-blue-600 text-white':dow===0?'text-red-400':dow===6?'text-blue-400':'text-gray-400'}`}>{d}</div>
+                    {activeBiz.length>0&&(
+                      <div className="space-y-0.5">
+                        {activeBiz.map(b=>{
+                          const amt=bd[b.key]||0;
+                          return <div key={b.key} className={`text-xs font-mono leading-tight ${amt>=0?b.textPos:'text-red-400'}`}>
+                            {amt>=0?'+':''}{amt.toFixed(1)}
+                          </div>;
+                        })}
+                        {activeBiz.length>1&&(
+                          <div className={`text-xs font-bold font-mono border-t border-gray-700/60 pt-0.5 ${dayTotal>=0?'text-white':'text-red-300'}`}>
+                            ={dayTotal>=0?'+':''}{dayTotal.toFixed(1)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Day detail */}
+          {selectedDay&&(
+            <div className="bg-gray-800 rounded-xl p-5 slide-in">
+              <h3 className="text-white font-bold mb-4">
+                {month}/{String(selectedDay).padStart(2,'0')} の詳細
+              </h3>
+              {selectedData&&Object.keys(selectedData).some(k=>filters.has(k)) ? (
+                <div className="space-y-2">
+                  {BUSINESSES.filter(b=>filters.has(b.key)&&selectedData[b.key]!==undefined).map(b=>{
+                    const amt=selectedData[b.key];
+                    return (
+                      <div key={b.key} className="flex items-center justify-between border-b border-gray-700 pb-2">
+                        <span className="text-gray-300 text-sm">{b.label}</span>
+                        <span className={`font-bold font-mono text-sm ${amt>=0?b.textPos:'text-red-400'}`}>
+                          {amt>=0?'+':''}{amt.toFixed(2)}$
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-gray-300 text-sm font-bold">合計</span>
+                    {(()=>{
+                      const total=BUSINESSES.filter(b=>filters.has(b.key)).reduce((s,b)=>s+(selectedData[b.key]||0),0);
+                      return <span className={`font-bold font-mono text-base ${total>=0?'text-emerald-400':'text-red-400'}`}>{total>=0?'+':''}{total.toFixed(2)}$</span>;
+                    })()}
+                  </div>
+                </div>
+              ):(
+                <p className="text-gray-600 text-sm">この日のデータはありません（フィルターを確認してください）</p>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
     // APP
     // ══════════════════════════════════════════════════════════════════════
     const TABS = [
@@ -1236,15 +1623,23 @@
       {key:'settings', label:'⚙️ 設定'},
     ];
 
+    const SECTIONS = [
+      {key:'trading', label:'📈 投資・トレード'},
+      {key:'poker',   label:'🃏 Poker'},
+      {key:'calendar',label:'📅 カレンダー'},
+    ];
+
     const App = () => {
-      const [trades,     setTrades]     = useState([]);
-      const [demoTrades, setDemoTrades] = useState([]);
-      const [settings,   setSettings]   = useState(DEFAULT_SETTINGS);
-      const [tab,        setTab]        = useState('dashboard');
-      const [month,      setMonth]      = useState(thisMonth);
-      const [prefill,    setPrefill]    = useState(null);
-      const [loading,    setLoading]    = useState(true);
-      const [error,      setError]      = useState(null);
+      const [trades,         setTrades]         = useState([]);
+      const [demoTrades,     setDemoTrades]      = useState([]);
+      const [pokerSessions,  setPokerSessions]   = useState([]);
+      const [settings,       setSettings]        = useState(DEFAULT_SETTINGS);
+      const [section,        setSection]         = useState('trading');
+      const [tab,            setTab]             = useState('dashboard');
+      const [month,          setMonth]           = useState(thisMonth);
+      const [prefill,        setPrefill]         = useState(null);
+      const [loading,        setLoading]         = useState(true);
+      const [error,          setError]           = useState(null);
       const [migrationPending, setMigrationPending] = useState(false);
       const [migrating,        setMigrating]        = useState(false);
 
@@ -1252,11 +1647,13 @@
         Promise.all([
           api.get('/api/trades?demo=false'),
           api.get('/api/trades?demo=true'),
-          api.get('/api/settings')
-        ]).then(([t, dt, s]) => {
+          api.get('/api/settings'),
+          api.get('/api/poker'),
+        ]).then(([t, dt, s, pk]) => {
           setTrades(t);
           setDemoTrades(dt);
           setSettings({...DEFAULT_SETTINGS, ...s});
+          setPokerSessions(pk);
           setLoading(false);
           // If server has no trades yet, check for local data to migrate
           if (t.length === 0 && dt.length === 0) {
@@ -1316,6 +1713,19 @@
         const updatedSettings = await api.post('/api/settings', newSettings);
         setSettings({...DEFAULT_SETTINGS, ...updatedSettings});
       };
+
+      const addPokerSession = async (session) => {
+        const s = await api.post('/api/poker', session);
+        setPokerSessions(ps => [...ps, s]);
+      };
+      const updatePokerSession = async (session) => {
+        const s = await api.put(`/api/poker/${session.id}`, session);
+        setPokerSessions(ps => ps.map(p => p.id===session.id ? s : p));
+      };
+      const deletePokerSession = async (id) => {
+        await api.del(`/api/poker/${id}`);
+        setPokerSessions(ps => ps.filter(p => p.id !== id));
+      };
       
       const realMetrics = useMemo(()=>calcMetrics(trades,    settings.initialBalance,    settings,month),[trades,    settings,month]);
       const demoMetrics = useMemo(()=>calcMetrics(demoTrades,settings.demoInitialBalance,settings,month),[demoTrades,settings,month]);
@@ -1351,9 +1761,9 @@
             <div className="max-w-7xl mx-auto px-4 py-3">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center text-sm">📈</div>
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center text-sm">📊</div>
                   <div>
-                    <h1 className="text-white font-bold text-sm">トレード KGI/KPI ダッシュボード</h1>
+                    <h1 className="text-white font-bold text-sm">PL 管理ダッシュボード</h1>
                     <p className="text-gray-600 text-xs">{new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric',weekday:'short'})}</p>
                   </div>
                 </div>
@@ -1369,34 +1779,57 @@
                   ))}
                 </div>
               </div>
+              {/* Top-level section nav */}
               <nav className="flex gap-1 mt-3 overflow-x-auto pb-1">
-                {TABS.map(({key,label})=>(
-                  <button key={key} onClick={()=>setTab(key)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${tab===key?'bg-blue-600 text-white':'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
+                {SECTIONS.map(({key,label})=>(
+                  <button key={key} onClick={()=>setSection(key)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${section===key?'bg-indigo-600 text-white':'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
                     {label}
-                    {key==='real'&&realMetrics.pendingCount>0&&<span className="ml-1.5 bg-amber-500 text-gray-900 rounded-full text-xs w-4 h-4 inline-flex items-center justify-center font-bold">{realMetrics.pendingCount}</span>}
                   </button>
                 ))}
               </nav>
+              {/* Sub-tabs for trading section */}
+              {section==='trading'&&(
+                <nav className="flex gap-1 mt-1 overflow-x-auto pb-1">
+                  {TABS.map(({key,label})=>(
+                    <button key={key} onClick={()=>setTab(key)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${tab===key?'bg-blue-600 text-white':'text-gray-500 hover:text-white hover:bg-gray-800'}`}>
+                      {label}
+                      {key==='real'&&realMetrics.pendingCount>0&&<span className="ml-1.5 bg-amber-500 text-gray-900 rounded-full text-xs w-4 h-4 inline-flex items-center justify-center font-bold">{realMetrics.pendingCount}</span>}
+                    </button>
+                  ))}
+                </nav>
+              )}
             </div>
           </header>
 
           <main className="max-w-7xl mx-auto px-4 py-6">
-            {tab!=='settings'&&tab!=='entry'&&(
-              <div className="flex items-center gap-3 mb-5">
-                <label className="text-gray-500 text-xs">表示月:</label>
-                <select value={month} onChange={e=>setMonth(e.target.value)}
-                  className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none">
-                  {monthOptions.map(m=><option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
+            {/* Trading section */}
+            {section==='trading'&&<>
+              {tab!=='settings'&&tab!=='entry'&&(
+                <div className="flex items-center gap-3 mb-5">
+                  <label className="text-gray-500 text-xs">表示月:</label>
+                  <select value={month} onChange={e=>setMonth(e.target.value)}
+                    className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none">
+                    {monthOptions.map(m=><option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+              )}
+              {tab==='dashboard'&&<DashboardTab trades={trades} demoTrades={demoTrades} settings={settings} month={month} />}
+              {tab==='entry'   &&<EntryChecker settings={settings} metrics={realMetrics} onPrefillTrade={handlePrefill} />}
+              {tab==='real'    &&<TradeTabContent trades={trades}     onAddTrade={(t)=>addTrade(t,false)} onUpdateTrade={(t)=>updateTrade(t,false)} onDeleteTrade={(id)=>deleteTrade(id,false)} settings={settings} initialBalance={settings.initialBalance}     month={month} isDemo={false} prefill={prefill?.isReal?prefill:null}    clearPrefill={()=>setPrefill(null)} />}
+              {tab==='demo'    &&<TradeTabContent trades={demoTrades} onAddTrade={(t)=>addTrade(t,true)}  onUpdateTrade={(t)=>updateTrade(t,true)}  onDeleteTrade={(id)=>deleteTrade(id,true)}  settings={settings} initialBalance={settings.demoInitialBalance} month={month} isDemo={true}  prefill={prefill&&!prefill.isReal?prefill:null} clearPrefill={()=>setPrefill(null)} />}
+              {tab==='settings'&&<SettingsForm settings={settings} onSave={saveSettings} />}
+            </>}
+            {/* Poker section */}
+            {section==='poker'&&(
+              <PokerPage sessions={pokerSessions}
+                onAdd={addPokerSession} onUpdate={updatePokerSession} onDelete={deletePokerSession}/>
             )}
-
-            {tab==='dashboard'&&<DashboardTab trades={trades} demoTrades={demoTrades} settings={settings} month={month} />}
-            {tab==='entry'   &&<EntryChecker settings={settings} metrics={realMetrics} onPrefillTrade={handlePrefill} />}
-            {tab==='real'    &&<TradeTabContent trades={trades}     onAddTrade={(t)=>addTrade(t, false)} onUpdateTrade={(t)=>updateTrade(t, false)} onDeleteTrade={(id)=>deleteTrade(id, false)} settings={settings} initialBalance={settings.initialBalance}     month={month} isDemo={false} prefill={prefill?.isReal?prefill:null}    clearPrefill={()=>setPrefill(null)} />}
-            {tab==='demo'    &&<TradeTabContent trades={demoTrades} onAddTrade={(t)=>addTrade(t, true)} onUpdateTrade={(t)=>updateTrade(t, true)} onDeleteTrade={(id)=>deleteTrade(id, true)} settings={settings} initialBalance={settings.demoInitialBalance} month={month} isDemo={true}  prefill={prefill&&!prefill.isReal?prefill:null} clearPrefill={()=>setPrefill(null)} />}
-            {tab==='settings'&&<SettingsForm settings={settings} onSave={saveSettings} />}
+            {/* Calendar section */}
+            {section==='calendar'&&(
+              <CalendarPage pokerSessions={pokerSessions} trades={trades}/>
+            )}
           </main>
 
           <footer className="max-w-7xl mx-auto px-4 py-6 text-center text-gray-700 text-xs">
