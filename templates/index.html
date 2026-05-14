@@ -33,7 +33,6 @@
 
     // ── Storage Keys ──────────────────────────────────────────────────────
     const TRADES_KEY      = 'tradedb_trades_v2';
-    const DEMO_TRADES_KEY = 'tradedb_demo_trades_v2';
     const SETTINGS_KEY    = 'tradedb_settings_v2';
 
     const DEFAULT_SETTINGS = {
@@ -45,7 +44,6 @@
       minRR:              2.0,
       minComplianceRate:  90,
       maxRiskPerTradePct: 2,
-      demoInitialBalance: 10000,
     };
 
     const parseResp = async (r) => {
@@ -738,7 +736,7 @@
       notes:'', pending:false,
     });
 
-    const TradeForm = ({ onAdd, onCancel, editTrade, prefill, isDemo }) => {
+    const TradeForm = ({ onAdd, onCancel, editTrade, prefill }) => {
       const [form, setForm] = useState(() => {
         if (editTrade) {
           return {
@@ -793,14 +791,13 @@
       };
 
       const inp    = "w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500";
-      const accent = isDemo ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-blue-600 hover:bg-blue-500';
+      const accent = 'bg-blue-600 hover:bg-blue-500';
 
       return (
         <form onSubmit={handleSubmit} className="bg-gray-800 rounded-xl p-6 space-y-4 fade-in">
           <div className="flex items-center justify-between">
             <h3 className="text-base font-bold text-white flex items-center gap-2">
-              {editTrade&&editTrade.status==='pending' ? '⏳ 結果を記録' : editTrade ? '✏️ 編集' : isDemo ? '🎮 デモ記録' : '➕ 新規記録'}
-              {isDemo&&<span className="text-xs bg-indigo-800 text-indigo-300 px-2 py-0.5 rounded-full">DEMO</span>}
+              {editTrade&&editTrade.status==='pending' ? '⏳ 結果を記録' : editTrade ? '✏️ 編集' : '➕ 新規記録'}
             </h3>
             {/* Pending toggle (only for new trades or existing pending) */}
             {(!editTrade || editTrade.status==='pending') && (
@@ -937,7 +934,7 @@
     // ══════════════════════════════════════════════════════════════════════
     // TRADE TABLE
     // ══════════════════════════════════════════════════════════════════════
-    const TradeTable = ({ trades, month, onEdit, onDelete, isDemo }) => {
+    const TradeTable = ({ trades, month, onEdit, onDelete }) => {
       const rows = trades
         .filter(t => t.date.startsWith(month))
         .sort((a,b) => {
@@ -953,8 +950,7 @@
         <div className="bg-gray-800 rounded-xl overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-700 flex items-center justify-between">
             <h3 className="font-bold text-white text-sm flex items-center gap-2">
-              📋 {isDemo?'デモ':'リアル'}トレード履歴
-              {isDemo&&<span className="text-xs bg-indigo-800 text-indigo-300 px-2 py-0.5 rounded-full">DEMO</span>}
+              📋 トレード履歴
             </h3>
             <div className="flex items-center gap-3">
               {rows.some(t=>t.status==='pending')&&<span className="text-amber-400 text-xs">⏳ 未決済あり</span>}
@@ -975,10 +971,8 @@
                     <th className="text-right px-4 py-3">粗損益</th>
                     <th className="text-right px-4 py-3">手数料</th>
                     <th className="text-right px-4 py-3">純損益</th>
-                    {isDemo
-                      ? <><th className="text-center px-4 py-3">RR</th><th className="text-center px-4 py-3">ルール</th></>
-                      : <><th className="text-right px-4 py-3">ポジション</th><th className="text-right px-4 py-3">損益%</th></>
-                    }
+                    <th className="text-right px-4 py-3">ポジション</th>
+                    <th className="text-right px-4 py-3">損益%</th>
                     <th className="text-left px-4 py-3">メモ</th>
                     <th className="px-4 py-3"></th>
                   </tr>
@@ -1014,33 +1008,14 @@
                         <td className={`px-4 py-3 text-right font-mono font-semibold ${isPending?'text-gray-600':nPnl>=0?'text-emerald-400':'text-red-400'}`}>
                           {isPending ? <span className="text-amber-500 text-xs">記録待ち</span> : fmt$(nPnl)}
                         </td>
-                        {isDemo ? (
-                          <>
-                            <td className="px-4 py-3 text-center text-gray-400 text-xs tabular-nums">
-                              {t.rr>0?`1:${t.rr.toFixed(2)}`:<span className="text-gray-600">—</span>}
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              {t.ruleCompliant
-                                ? <span className="text-base">✅</span>
-                                : <span title={[!t.ruleSplitEntry&&'分割未実施',!t.ruleSlTpSet&&'SL/TP未設定',!t.ruleChartBasis&&'根拠なし'].filter(Boolean).join(' / ')}
-                                    className="text-yellow-400 text-xs cursor-help">
-                                    ⚠️{[!t.ruleSplitEntry&&'分割',!t.ruleSlTpSet&&'SL/TP',!t.ruleChartBasis&&'根拠'].filter(Boolean).join('/')}
-                                  </span>
-                              }
-                            </td>
-                          </>
-                        ) : (
-                          <>
-                            <td className="px-4 py-3 text-right font-mono text-xs text-blue-300 tabular-nums">
-                              {tPosSize>0 ? `$${tPosSize.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}` : <span className="text-gray-600">—</span>}
-                            </td>
-                            <td className={`px-4 py-3 text-right font-mono text-xs tabular-nums font-semibold ${tPnlPct===null?'text-gray-600':tPnlPct>=0?'text-emerald-400':'text-red-400'}`}>
-                              {tPnlPct===null
-                                ? (isPending ? <span className="text-amber-500">記録待ち</span> : '—')
-                                : `${tPnlPct>=0?'+':''}${tPnlPct.toFixed(2)}%`}
-                            </td>
-                          </>
-                        )}
+                        <td className="px-4 py-3 text-right font-mono text-xs text-blue-300 tabular-nums">
+                          {tPosSize>0 ? `$${tPosSize.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}` : <span className="text-gray-600">—</span>}
+                        </td>
+                        <td className={`px-4 py-3 text-right font-mono text-xs tabular-nums font-semibold ${tPnlPct===null?'text-gray-600':tPnlPct>=0?'text-emerald-400':'text-red-400'}`}>
+                          {tPnlPct===null
+                            ? (isPending ? <span className="text-amber-500">記録待ち</span> : '—')
+                            : `${tPnlPct>=0?'+':''}${tPnlPct.toFixed(2)}%`}
+                        </td>
                         <td className="px-4 py-3 text-gray-500 text-xs max-w-[130px] truncate">{t.notes||<span className="text-gray-700">—</span>}</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-2 whitespace-nowrap">
@@ -1083,7 +1058,7 @@
     };
 
     // ── Trade Tab Content ─────────────────────────────────────────────────
-    const TradeTabContent = ({ trades, onAddTrade, onUpdateTrade, onDeleteTrade, settings, initialBalance, month, isDemo, prefill, clearPrefill }) => {
+    const TradeTabContent = ({ trades, onAddTrade, onUpdateTrade, onDeleteTrade, settings, initialBalance, month, prefill, clearPrefill }) => {
       const [showForm,  setShowForm]  = useState(!!prefill);
       const [editTrade, setEditTrade] = useState(null);
 
@@ -1132,20 +1107,20 @@
 
           <div className="flex justify-end">
             <button onClick={()=>{ setEditTrade(null); clearPrefill?.(); setShowForm(v=>!v); }}
-              className={`${isDemo?'bg-indigo-600 hover:bg-indigo-500':'bg-blue-600 hover:bg-blue-500'} text-white rounded-lg px-5 py-2 text-sm font-semibold transition-colors flex items-center gap-2`}>
+              className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-5 py-2 text-sm font-semibold transition-colors flex items-center gap-2">
               <span>＋</span> トレード記録
             </button>
           </div>
 
           {showForm&&(
-            <TradeForm onAdd={handleAdd} onCancel={()=>{setShowForm(false);setEditTrade(null);clearPrefill?.();}} editTrade={editTrade} prefill={prefill} isDemo={isDemo} />
+            <TradeForm onAdd={handleAdd} onCancel={()=>{setShowForm(false);setEditTrade(null);clearPrefill?.();}} editTrade={editTrade} prefill={prefill} />
           )}
 
-          <TradeTable trades={trades} month={month} onEdit={handleEdit} onDelete={handleDelete} isDemo={isDemo} />
+          <TradeTable trades={trades} month={month} onEdit={handleEdit} onDelete={handleDelete} />
 
           <div className="bg-gray-800 rounded-xl p-6">
-            <h3 className="text-sm font-bold text-white mb-4">{isDemo?'🎮 デモ口座 資産推移':'📈 資産推移'}</h3>
-            <AssetChart trades={trades} initialBalance={initialBalance} color={isDemo?'#6366f1':'#10b981'} label={isDemo?'デモ残高':'口座残高'} />
+            <h3 className="text-sm font-bold text-white mb-4">📈 資産推移</h3>
+            <AssetChart trades={trades} initialBalance={initialBalance} color='#10b981' label='口座残高' />
           </div>
         </div>
       );
@@ -1174,7 +1149,6 @@
           minRR:              p('minRR',2.0),
           minComplianceRate:  p('minComplianceRate',90),
           maxRiskPerTradePct: p('maxRiskPerTradePct',2),
-          demoInitialBalance: Math.max(1, parseFloat(form.demoInitialBalance)||10000),
         });
         setSaved(true); setTimeout(()=>setSaved(false),2500);
       };
@@ -1223,14 +1197,6 @@
             ))}
           </div>
 
-          <div className="bg-gray-800 rounded-xl p-6 space-y-4">
-            <p className={sec}>🎮 デモ口座</p>
-            <div>
-              <label className="block text-gray-400 text-xs mb-1">デモ初期残高 ($)</label>
-              <input type="number" step="1" min="1" value={form.demoInitialBalance} onChange={e=>set('demoInitialBalance',e.target.value)} className={inp} />
-            </div>
-          </div>
-
           <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white rounded-xl py-3 text-sm font-semibold transition-colors">
             設定を保存する
           </button>
@@ -1241,9 +1207,8 @@
     // ══════════════════════════════════════════════════════════════════════
     // DASHBOARD TAB
     // ══════════════════════════════════════════════════════════════════════
-    const DashboardTab = ({ trades, demoTrades, settings, month }) => {
-      const metrics     = useMemo(()=>calcMetrics(trades,     settings.initialBalance,     settings, month),[trades,    settings,month]);
-      const demoMetrics = useMemo(()=>calcMetrics(demoTrades, settings.demoInitialBalance, settings, month),[demoTrades,settings,month]);
+    const DashboardTab = ({ trades, settings, month }) => {
+      const metrics = useMemo(()=>calcMetrics(trades, settings.initialBalance, settings, month),[trades,settings,month]);
 
       const kpi = {
         compliance: kpiStat(metrics.complianceRate, settings.minComplianceRate),
@@ -2484,7 +2449,6 @@
 
     const App = () => {
       const [trades,         setTrades]         = useState([]);
-      const [demoTrades,     setDemoTrades]      = useState([]);
       const [pokerSessions,  setPokerSessions]   = useState([]);
       const [pokerCheckins,  setPokerCheckins]   = useState({});
       const [handReviews,    setHandReviews]     = useState([]);
@@ -2501,16 +2465,14 @@
 
       useEffect(() => {
         Promise.all([
-          api.get('/api/trades?demo=false'),
-          api.get('/api/trades?demo=true'),
+          api.get('/api/trades'),
           api.get('/api/settings'),
           api.get('/api/poker'),
           api.get('/api/poker/checkins'),
           api.get('/api/poker/hands'),
           api.get('/api/prediction'),
-        ]).then(([t, dt, s, pk, ck, hr, pb]) => {
+        ]).then(([t, s, pk, ck, hr, pb]) => {
           setTrades(t);
-          setDemoTrades(dt);
           setSettings({...DEFAULT_SETTINGS, ...s});
           setPokerSessions(pk);
           const ckMap = {};
@@ -2520,11 +2482,10 @@
           setPredictionBets(pb);
           setLoading(false);
           // If server has no trades yet, check for local data to migrate
-          if (t.length === 0 && dt.length === 0) {
+          if (t.length === 0) {
             try {
               const lsReal = localStorage.getItem('tradedb_trades_v2');
-              const lsDemo = localStorage.getItem('tradedb_demo_trades_v2');
-              const hasLocal = (lsReal && JSON.parse(lsReal).length > 0) || (lsDemo && JSON.parse(lsDemo).length > 0);
+              const hasLocal = lsReal && JSON.parse(lsReal).length > 0;
               if (hasLocal) setMigrationPending(true);
             } catch {}
           }
@@ -2539,38 +2500,32 @@
         setMigrating(true);
         try {
           const lsReal = JSON.parse(localStorage.getItem('tradedb_trades_v2') || '[]');
-          const lsDemo = JSON.parse(localStorage.getItem('tradedb_demo_trades_v2') || '[]');
           const lsSettings = JSON.parse(localStorage.getItem('tradedb_settings_v2') || '{}');
-          for (const t of lsReal) await api.post('/api/trades?demo=false', t).catch(()=>{});
-          for (const t of lsDemo) await api.post('/api/trades?demo=true', t).catch(()=>{});
+          for (const t of lsReal) await api.post('/api/trades', t).catch(()=>{});
           if (Object.keys(lsSettings).length > 0) await api.post('/api/settings', lsSettings).catch(()=>{});
-          const [t, dt, s] = await Promise.all([
-            api.get('/api/trades?demo=false'),
-            api.get('/api/trades?demo=true'),
+          const [t, s] = await Promise.all([
+            api.get('/api/trades'),
             api.get('/api/settings'),
           ]);
-          setTrades(t); setDemoTrades(dt); setSettings({...DEFAULT_SETTINGS, ...s});
+          setTrades(t); setSettings({...DEFAULT_SETTINGS, ...s});
           setMigrationPending(false);
         } catch (e) { alert('移行中にエラーが発生しました: ' + e); }
         setMigrating(false);
       };
 
-      const addTrade = async (trade, isDemo) => {
-        const newTrade = await api.post(`/api/trades?demo=${isDemo}`, trade);
-        if (isDemo) setDemoTrades(ts => [...ts, newTrade]);
-        else setTrades(ts => [...ts, newTrade]);
+      const addTrade = async (trade) => {
+        const newTrade = await api.post('/api/trades', trade);
+        setTrades(ts => [...ts, newTrade]);
       };
 
-      const updateTrade = async (trade, isDemo) => {
+      const updateTrade = async (trade) => {
         const updatedTrade = await api.put(`/api/trades/${trade.id}`, trade);
-        if (isDemo) setDemoTrades(ts => ts.map(t => t.id === trade.id ? updatedTrade : t));
-        else setTrades(ts => ts.map(t => t.id === trade.id ? updatedTrade : t));
+        setTrades(ts => ts.map(t => t.id === trade.id ? updatedTrade : t));
       };
 
-      const deleteTrade = async (id, isDemo) => {
+      const deleteTrade = async (id) => {
         await api.del(`/api/trades/${id}`);
-        if (isDemo) setDemoTrades(ts => ts.filter(t => t.id !== id));
-        else setTrades(ts => ts.filter(t => t.id !== id));
+        setTrades(ts => ts.filter(t => t.id !== id));
       };
 
       const saveSettings = async (newSettings) => {
@@ -2619,16 +2574,15 @@
         setPredictionBets(bs => bs.filter(x => x.id !== id));
       };
       
-      const realMetrics = useMemo(()=>calcMetrics(trades,    settings.initialBalance,    settings,month),[trades,    settings,month]);
-      const demoMetrics = useMemo(()=>calcMetrics(demoTrades,settings.demoInitialBalance,settings,month),[demoTrades,settings,month]);
+      const realMetrics = useMemo(()=>calcMetrics(trades, settings.initialBalance, settings, month),[trades,settings,month]);
 
       const monthOptions = useMemo(()=>{
         const s=new Set([thisMonth()]);
-        [...trades,...demoTrades].forEach(t=>s.add(t.date.slice(0,7)));
+        trades.forEach(t=>s.add(t.date.slice(0,7)));
         return [...s].sort().reverse();
-      },[trades,demoTrades]);
+      },[trades]);
 
-      const handlePrefill = useCallback((data)=>{ setPrefill(data); setTab(data.isReal?'real':'demo'); },[]);
+      const handlePrefill = useCallback((data)=>{ setPrefill(data); setTab('real'); },[]);
 
       if (loading) return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-white">Loading...</div>;
       if (error) return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-red-500">Error: {error}</div>;
@@ -2704,10 +2658,9 @@
                   </select>
                 </div>
               )}
-              {tab==='dashboard'&&<DashboardTab trades={trades} demoTrades={demoTrades} settings={settings} month={month} />}
+              {tab==='dashboard'&&<DashboardTab trades={trades} settings={settings} month={month} />}
               {tab==='entry'   &&<EntryChecker settings={settings} metrics={realMetrics} onPrefillTrade={handlePrefill} />}
-              {tab==='real'    &&<TradeTabContent trades={trades}     onAddTrade={(t)=>addTrade(t,false)} onUpdateTrade={(t)=>updateTrade(t,false)} onDeleteTrade={(id)=>deleteTrade(id,false)} settings={settings} initialBalance={settings.initialBalance}     month={month} isDemo={false} prefill={prefill?.isReal?prefill:null}    clearPrefill={()=>setPrefill(null)} />}
-              {tab==='demo'    &&<TradeTabContent trades={demoTrades} onAddTrade={(t)=>addTrade(t,true)}  onUpdateTrade={(t)=>updateTrade(t,true)}  onDeleteTrade={(id)=>deleteTrade(id,true)}  settings={settings} initialBalance={settings.demoInitialBalance} month={month} isDemo={true}  prefill={prefill&&!prefill.isReal?prefill:null} clearPrefill={()=>setPrefill(null)} />}
+              {tab==='real'&&<TradeTabContent trades={trades} onAddTrade={addTrade} onUpdateTrade={updateTrade} onDeleteTrade={deleteTrade} settings={settings} initialBalance={settings.initialBalance} month={month} prefill={prefill} clearPrefill={()=>setPrefill(null)} />}
               {tab==='settings'&&<SettingsForm settings={settings} onSave={saveSettings} />}
             </>}
             {/* Poker section */}

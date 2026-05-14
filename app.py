@@ -20,7 +20,6 @@ DEFAULT_SETTINGS = {
     'minRR': 2.0,
     'minComplianceRate': 90.0,
     'maxRiskPerTradePct': 2.0,
-    'demoInitialBalance': 10000.0,
 }
 
 def row_to_trade(row):
@@ -55,7 +54,6 @@ def row_to_settings(row):
         'minRR': row['min_rr'],
         'minComplianceRate': row['min_compliance_rate'],
         'maxRiskPerTradePct': row['max_risk_per_trade_pct'],
-        'demoInitialBalance': row['demo_initial_balance'],
     }
 
 def settings_to_row(data):
@@ -68,7 +66,6 @@ def settings_to_row(data):
         'min_rr': float(data.get('minRR', DEFAULT_SETTINGS['minRR'])),
         'min_compliance_rate': float(data.get('minComplianceRate', DEFAULT_SETTINGS['minComplianceRate'])),
         'max_risk_per_trade_pct': float(data.get('maxRiskPerTradePct', DEFAULT_SETTINGS['maxRiskPerTradePct'])),
-        'demo_initial_balance': float(data.get('demoInitialBalance', DEFAULT_SETTINGS['demoInitialBalance'])),
     }
 
 @app.route('/')
@@ -79,14 +76,12 @@ def index():
 
 @app.route('/api/trades', methods=['GET'])
 def get_trades():
-    is_demo = request.args.get('demo', 'false').lower() == 'true'
-    res = supabase.table('trades').select('*').eq('is_demo', is_demo).order('date').execute()
+    res = supabase.table('trades').select('*').eq('is_demo', False).order('date').execute()
     return jsonify([row_to_trade(r) for r in res.data])
 
 @app.route('/api/trades', methods=['POST'])
 def add_trade():
     data = request.json
-    is_demo = request.args.get('demo', 'false').lower() == 'true'
     split = bool(data.get('ruleSplitEntry', True))
     sl_tp = bool(data.get('ruleSlTpSet',    True))
     chart = bool(data.get('ruleChartBasis', True))
@@ -106,7 +101,7 @@ def add_trade():
         'rule_compliant':    split and sl_tp and chart,
         'notes':             data.get('notes', ''),
         'status':            data.get('status', 'closed'),
-        'is_demo':           is_demo,
+        'is_demo':           False,
     }
     res = supabase.table('trades').insert(row).execute()
     return jsonify(row_to_trade(res.data[0])), 201
