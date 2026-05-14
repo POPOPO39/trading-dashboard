@@ -763,6 +763,9 @@
       const commVal = parseFloat(form.commission) || 0;
       const grossPnl = form.pending ? 0 : (form.result==='loss' ? -Math.abs(pnlVal) : Math.abs(pnlVal));
       const netVal  = grossPnl - commVal;
+      const posSize = (parseFloat(form.lotSize)||0) * (parseFloat(form.entryPrice)||0);
+      const pnlPct  = posSize > 0 && !form.pending && !isNaN(pnlVal) && pnlVal > 0
+                      ? (netVal / posSize * 100) : null;
 
       const handleSubmit = (e) => {
         e.preventDefault(); setError('');
@@ -876,6 +879,24 @@
             </div>
           </div>
 
+          {/* Position size + pnl% computed preview */}
+          {posSize > 0 && (
+            <div className="flex items-center gap-4 rounded-lg bg-gray-700/40 px-4 py-2.5 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400">ポジションサイズ</span>
+                <span className="font-mono font-bold text-blue-300">${posSize.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+              </div>
+              {pnlPct !== null && (
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">損益%</span>
+                  <span className={`font-mono font-bold ${pnlPct>=0?'text-emerald-400':'text-red-400'}`}>
+                    {pnlPct>=0?'+':''}{pnlPct.toFixed(2)}%
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Entry rule checklist */}
           <div>
             <label className="block text-gray-400 text-xs mb-2">
@@ -954,8 +975,10 @@
                     <th className="text-right px-4 py-3">粗損益</th>
                     <th className="text-right px-4 py-3">手数料</th>
                     <th className="text-right px-4 py-3">純損益</th>
-                    <th className="text-center px-4 py-3">RR</th>
-                    <th className="text-center px-4 py-3">ルール</th>
+                    {isDemo
+                      ? <><th className="text-center px-4 py-3">RR</th><th className="text-center px-4 py-3">ルール</th></>
+                      : <><th className="text-right px-4 py-3">ポジション</th><th className="text-right px-4 py-3">損益%</th></>
+                    }
                     <th className="text-left px-4 py-3">メモ</th>
                     <th className="px-4 py-3"></th>
                   </tr>
@@ -966,6 +989,8 @@
                     const comm      = t.commission||0;
                     const nPnl      = netPnl(t);
                     const grossPnl  = t.pnl||0;
+                    const tPosSize  = (t.lotSize||0) * (t.entryPrice||0);
+                    const tPnlPct   = tPosSize > 0 && !isPending ? (nPnl / tPosSize * 100) : null;
 
                     return (
                       <tr key={t.id} className={`border-t border-gray-700/40 transition-colors ${isPending?'pending-row':i%2===1?'bg-gray-900/20':''} hover:bg-gray-700/25`}>
@@ -989,18 +1014,33 @@
                         <td className={`px-4 py-3 text-right font-mono font-semibold ${isPending?'text-gray-600':nPnl>=0?'text-emerald-400':'text-red-400'}`}>
                           {isPending ? <span className="text-amber-500 text-xs">記録待ち</span> : fmt$(nPnl)}
                         </td>
-                        <td className="px-4 py-3 text-center text-gray-400 text-xs tabular-nums">
-                          {t.rr>0?`1:${t.rr.toFixed(2)}`:<span className="text-gray-600">—</span>}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {t.ruleCompliant
-                            ? <span className="text-base">✅</span>
-                            : <span title={[!t.ruleSplitEntry&&'分割未実施',!t.ruleSlTpSet&&'SL/TP未設定',!t.ruleChartBasis&&'根拠なし'].filter(Boolean).join(' / ')}
-                                className="text-yellow-400 text-xs cursor-help">
-                                ⚠️{[!t.ruleSplitEntry&&'分割',!t.ruleSlTpSet&&'SL/TP',!t.ruleChartBasis&&'根拠'].filter(Boolean).join('/')}
-                              </span>
-                          }
-                        </td>
+                        {isDemo ? (
+                          <>
+                            <td className="px-4 py-3 text-center text-gray-400 text-xs tabular-nums">
+                              {t.rr>0?`1:${t.rr.toFixed(2)}`:<span className="text-gray-600">—</span>}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {t.ruleCompliant
+                                ? <span className="text-base">✅</span>
+                                : <span title={[!t.ruleSplitEntry&&'分割未実施',!t.ruleSlTpSet&&'SL/TP未設定',!t.ruleChartBasis&&'根拠なし'].filter(Boolean).join(' / ')}
+                                    className="text-yellow-400 text-xs cursor-help">
+                                    ⚠️{[!t.ruleSplitEntry&&'分割',!t.ruleSlTpSet&&'SL/TP',!t.ruleChartBasis&&'根拠'].filter(Boolean).join('/')}
+                                  </span>
+                              }
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-4 py-3 text-right font-mono text-xs text-blue-300 tabular-nums">
+                              {tPosSize>0 ? `$${tPosSize.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}` : <span className="text-gray-600">—</span>}
+                            </td>
+                            <td className={`px-4 py-3 text-right font-mono text-xs tabular-nums font-semibold ${tPnlPct===null?'text-gray-600':tPnlPct>=0?'text-emerald-400':'text-red-400'}`}>
+                              {tPnlPct===null
+                                ? (isPending ? <span className="text-amber-500">記録待ち</span> : '—')
+                                : `${tPnlPct>=0?'+':''}${tPnlPct.toFixed(2)}%`}
+                            </td>
+                          </>
+                        )}
                         <td className="px-4 py-3 text-gray-500 text-xs max-w-[130px] truncate">{t.notes||<span className="text-gray-700">—</span>}</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-2 whitespace-nowrap">
