@@ -367,28 +367,44 @@ def hand_to_row(data):
 
 @app.route('/api/poker/hands', methods=['GET'])
 def get_hand_reviews():
-    res = supabase.table('poker_hand_reviews').select('*').order('date', desc=True).execute()
-    return jsonify([row_to_hand(r) for r in res.data])
+    try:
+        res = supabase.table('poker_hand_reviews').select('*').order('date', desc=True).execute()
+        return jsonify([row_to_hand(r) for r in res.data])
+    except Exception as e:
+        print(f'get_hand_reviews error: {e}')
+        return jsonify([])
 
 @app.route('/api/poker/hands', methods=['POST'])
 def add_hand_review():
-    data = request.json
-    row = {'id': data['id'], **hand_to_row(data)}
-    res = supabase.table('poker_hand_reviews').insert(row).execute()
-    return jsonify(row_to_hand(res.data[0])), 201
+    try:
+        data = request.json
+        row = {'id': data['id'], **hand_to_row(data)}
+        res = supabase.table('poker_hand_reviews').insert(row).execute()
+        return jsonify(row_to_hand(res.data[0])), 201
+    except Exception as e:
+        print(f'add_hand_review error: {e}')
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/poker/hands/<hand_id>', methods=['PUT'])
 def update_hand_review(hand_id):
-    data = request.json
-    res = supabase.table('poker_hand_reviews').update(hand_to_row(data)).eq('id', hand_id).execute()
-    if not res.data:
-        return jsonify({'error': 'Not found'}), 404
-    return jsonify(row_to_hand(res.data[0]))
+    try:
+        data = request.json
+        res = supabase.table('poker_hand_reviews').update(hand_to_row(data)).eq('id', hand_id).execute()
+        if not res.data:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify(row_to_hand(res.data[0]))
+    except Exception as e:
+        print(f'update_hand_review error: {e}')
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/poker/hands/<hand_id>', methods=['DELETE'])
 def delete_hand_review(hand_id):
-    supabase.table('poker_hand_reviews').delete().eq('id', hand_id).execute()
-    return jsonify({'success': True})
+    try:
+        supabase.table('poker_hand_reviews').delete().eq('id', hand_id).execute()
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f'delete_hand_review error: {e}')
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

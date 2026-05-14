@@ -48,11 +48,16 @@
       demoInitialBalance: 10000,
     };
 
+    const parseResp = async (r) => {
+      const text = await r.text();
+      try { return JSON.parse(text); }
+      catch { throw new Error(`Server error ${r.status}: ${text.slice(0,200)}`); }
+    };
     const api = {
-      get: async (url) => { const r = await fetch(url); return r.json(); },
-      post: async (url, data) => { const r = await fetch(url, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }); return r.json(); },
-      put: async (url, data) => { const r = await fetch(url, { method: 'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }); return r.json(); },
-      del: async (url) => { const r = await fetch(url, { method: 'DELETE' }); return r.json(); },
+      get:  async (url)        => parseResp(await fetch(url)),
+      post: async (url, data)  => parseResp(await fetch(url, { method:'POST',   headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) })),
+      put:  async (url, data)  => parseResp(await fetch(url, { method:'PUT',    headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) })),
+      del:  async (url)        => parseResp(await fetch(url, { method:'DELETE' })),
     };
 
     // ── Helpers ───────────────────────────────────────────────────────────
