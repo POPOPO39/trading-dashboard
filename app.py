@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify
 from supabase import create_client, Client
 from dotenv import load_dotenv
-import os
+import os, json
 
 load_dotenv()  # .env ファイルを自動読み込み
 
@@ -36,6 +36,7 @@ def row_to_trade(row):
         'commission':     row['commission'],
         'rr':             row['rr'],
         'lotSize':        row.get('lot_size', 0) or 0,
+        'entryPrice':     row.get('entry_price', 0) or 0,
         'ruleSplitEntry': split,
         'ruleSlTpSet':    sl_tp,
         'ruleChartBasis': chart,
@@ -98,6 +99,7 @@ def add_trade():
         'commission':        float(data.get('commission', 0.0)),
         'rr':                float(data.get('rr', 0.0)),
         'lot_size':          float(data.get('lotSize', 0.0)),
+        'entry_price':       float(data.get('entryPrice', 0.0)),
         'rule_split_entry':  split,
         'rule_sl_tp_set':    sl_tp,
         'rule_chart_basis':  chart,
@@ -123,6 +125,7 @@ def update_trade(trade_id):
         'commission':       float(data.get('commission', 0.0)),
         'rr':               float(data.get('rr', 0.0)),
         'lot_size':         float(data.get('lotSize', 0.0)),
+        'entry_price':      float(data.get('entryPrice', 0.0)),
         'rule_split_entry': split,
         'rule_sl_tp_set':   sl_tp,
         'rule_chart_basis': chart,
@@ -302,6 +305,89 @@ def update_prediction_bet(bet_id):
 @app.route('/api/prediction/<bet_id>', methods=['DELETE'])
 def delete_prediction_bet(bet_id):
     supabase.table('prediction_bets').delete().eq('id', bet_id).execute()
+    return jsonify({'success': True})
+
+# --- Poker Hand Reviews ---
+
+def row_to_hand(row):
+    def jl(s, default):
+        try: return json.loads(s or default)
+        except: return json.loads(default)
+    return {
+        'id':              row['id'],
+        'date':            row['date'],
+        'heroPosition':    row['hero_position'],
+        'villainPosition': row['villain_position'],
+        'heroHand':        jl(row['hero_hand'],   '[]'),
+        'villainHand':     jl(row['villain_hand'], '[]'),
+        'flopBoard':       jl(row['flop_board'],   '[]'),
+        'turnCard':        jl(row['turn_card'],    'null'),
+        'riverCard':       jl(row['river_card'],   'null'),
+        'preflopPotBb':    row['preflop_pot_bb'],
+        'preflopAction':   row['preflop_action'],
+        'preflopMemo':     row['preflop_memo'],
+        'flopPotBb':       row['flop_pot_bb'],
+        'flopAction':      row['flop_action'],
+        'flopMemo':        row['flop_memo'],
+        'turnPotBb':       row['turn_pot_bb'],
+        'turnAction':      row['turn_action'],
+        'turnMemo':        row['turn_memo'],
+        'riverPotBb':      row['river_pot_bb'],
+        'riverAction':     row['river_action'],
+        'riverMemo':       row['river_memo'],
+        'resultBb':        row['result_bb'],
+        'notes':           row['notes'] or '',
+    }
+
+def hand_to_row(data):
+    return {
+        'date':             data['date'],
+        'hero_position':    data.get('heroPosition', ''),
+        'villain_position': data.get('villainPosition', ''),
+        'hero_hand':        json.dumps(data.get('heroHand', [])),
+        'villain_hand':     json.dumps(data.get('villainHand', [])),
+        'flop_board':       json.dumps(data.get('flopBoard', [])),
+        'turn_card':        json.dumps(data.get('turnCard')),
+        'river_card':       json.dumps(data.get('riverCard')),
+        'preflop_pot_bb':   float(data.get('preflopPotBb', 0)),
+        'preflop_action':   data.get('preflopAction', ''),
+        'preflop_memo':     data.get('preflopMemo', ''),
+        'flop_pot_bb':      float(data.get('flopPotBb', 0)),
+        'flop_action':      data.get('flopAction', ''),
+        'flop_memo':        data.get('flopMemo', ''),
+        'turn_pot_bb':      float(data.get('turnPotBb', 0)),
+        'turn_action':      data.get('turnAction', ''),
+        'turn_memo':        data.get('turnMemo', ''),
+        'river_pot_bb':     float(data.get('riverPotBb', 0)),
+        'river_action':     data.get('riverAction', ''),
+        'river_memo':       data.get('riverMemo', ''),
+        'result_bb':        float(data['resultBb']) if data.get('resultBb') not in (None, '') else None,
+        'notes':            data.get('notes', ''),
+    }
+
+@app.route('/api/poker/hands', methods=['GET'])
+def get_hand_reviews():
+    res = supabase.table('poker_hand_reviews').select('*').order('date', desc=True).execute()
+    return jsonify([row_to_hand(r) for r in res.data])
+
+@app.route('/api/poker/hands', methods=['POST'])
+def add_hand_review():
+    data = request.json
+    row = {'id': data['id'], **hand_to_row(data)}
+    res = supabase.table('poker_hand_reviews').insert(row).execute()
+    return jsonify(row_to_hand(res.data[0])), 201
+
+@app.route('/api/poker/hands/<hand_id>', methods=['PUT'])
+def update_hand_review(hand_id):
+    data = request.json
+    res = supabase.table('poker_hand_reviews').update(hand_to_row(data)).eq('id', hand_id).execute()
+    if not res.data:
+        return jsonify({'error': 'Not found'}), 404
+    return jsonify(row_to_hand(res.data[0]))
+
+@app.route('/api/poker/hands/<hand_id>', methods=['DELETE'])
+def delete_hand_review(hand_id):
+    supabase.table('poker_hand_reviews').delete().eq('id', hand_id).execute()
     return jsonify({'success': True})
 
 if __name__ == '__main__':

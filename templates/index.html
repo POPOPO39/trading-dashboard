@@ -728,7 +728,7 @@
     const EMPTY_FORM = (prefill) => ({
       date: todayStr(), pair: prefill?.pair||'', result:'win',
       pnl:'', rr: prefill?.rr ? parseFloat(prefill.rr).toFixed(2) : '',
-      commission:'', lotSize:'',
+      commission:'', lotSize:'', entryPrice:'',
       ruleSplitEntry:true, ruleSlTpSet:true, ruleChartBasis:true,
       notes:'', pending:false,
     });
@@ -742,6 +742,7 @@
             commission:     (editTrade.commission||0).toString(),
             rr:             editTrade.rr>0 ? editTrade.rr.toString() : '',
             lotSize:        (editTrade.lotSize||0) > 0 ? editTrade.lotSize.toString() : '',
+            entryPrice:     (editTrade.entryPrice||0) > 0 ? editTrade.entryPrice.toString() : '',
             ruleSplitEntry: editTrade.ruleSplitEntry ?? true,
             ruleSlTpSet:    editTrade.ruleSlTpSet    ?? true,
             ruleChartBasis: editTrade.ruleChartBasis ?? true,
@@ -773,6 +774,7 @@
           commission:   commVal,
           rr:             parseFloat(form.rr)||0,
           lotSize:        parseFloat(form.lotSize)||0,
+          entryPrice:     parseFloat(form.entryPrice)||0,
           ruleSplitEntry: form.ruleSplitEntry,
           ruleSlTpSet:    form.ruleSlTpSet,
           ruleChartBasis: form.ruleChartBasis,
@@ -854,14 +856,18 @@
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="block text-gray-400 text-xs mb-1">RR比 <span className="text-gray-600">(例: 2.50 → 1:2.50)</span></label>
+              <label className="block text-gray-400 text-xs mb-1">RR比 <span className="text-gray-600">(1:XX)</span></label>
               <input type="number" step="0.01" min="0" placeholder="2.00" value={form.rr} onChange={e=>set('rr',e.target.value)} className={inp} />
             </div>
             <div>
               <label className="block text-gray-400 text-xs mb-1">ロット数</label>
               <input type="number" step="0.01" min="0" placeholder="0.10" value={form.lotSize} onChange={e=>set('lotSize',e.target.value)} className={inp} />
+            </div>
+            <div>
+              <label className="block text-gray-400 text-xs mb-1">エントリー価格</label>
+              <input type="number" step="0.00001" min="0" placeholder="150.000" value={form.entryPrice} onChange={e=>set('entryPrice',e.target.value)} className={inp} />
             </div>
           </div>
 
@@ -1225,27 +1231,6 @@
             <AssetChart trades={trades} initialBalance={settings.initialBalance} />
           </div>
 
-          {demoTrades.length>0&&(
-            <div className="bg-gray-800 rounded-xl p-6">
-              <h2 className="text-sm font-bold text-white mb-4">🔄 リアル vs デモ 比較</h2>
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  {label:'リアル口座',m:metrics,    color:'text-emerald-400'},
-                  {label:'デモ口座',  m:demoMetrics,color:'text-indigo-400'},
-                ].map(({label,m,color})=>(
-                  <div key={label} className="bg-gray-700/50 rounded-lg p-4 space-y-1">
-                    <div className="text-gray-400 text-xs font-semibold">{label}</div>
-                    <div className={`text-xl font-bold font-mono ${color}`}>{fmt$(m.monthNetPnL)}</div>
-                    <div className="text-gray-500 text-xs">
-                      勝率: {m.winRate!==null?`${m.winRate.toFixed(1)}%`:'—'} ｜
-                      RR: {m.avgRR!==null?`1:${m.avgRR.toFixed(1)}`:'—'} ｜
-                      手数料: {m.monthCommission>0?`$${m.monthCommission.toFixed(2)}`:'—'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           <div className="grid grid-cols-3 gap-4">
             {[
@@ -1260,6 +1245,318 @@
               </div>
             ))}
           </div>
+        </div>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // CARD COMPONENTS
+    // ══════════════════════════════════════════════════════════════════════
+    const SUITS = [
+      {key:'s', sym:'♠', cls:'text-gray-900'},
+      {key:'h', sym:'♥', cls:'text-red-600'},
+      {key:'d', sym:'♦', cls:'text-red-600'},
+      {key:'c', sym:'♣', cls:'text-gray-900'},
+    ];
+    const RANKS = ['A','K','Q','J','T','9','8','7','6','5','4','3','2'];
+    const POSITIONS = ['UTG','UTG+1','UTG+2','LJ','HJ','CO','BTN','SB','BB'];
+
+    const CardDisplay = ({ card }) => {
+      if (!card?.rank) return (
+        <div className="w-8 h-11 bg-gray-700 border border-dashed border-gray-600 rounded flex items-center justify-center text-gray-600 text-lg select-none">?</div>
+      );
+      const s = SUITS.find(x=>x.key===card.suit)||SUITS[0];
+      return (
+        <div className="w-8 h-11 bg-white rounded shadow flex flex-col items-center justify-center select-none">
+          <span className={`text-xs font-black leading-none ${s.cls}`}>{card.rank}</span>
+          <span className={`text-sm leading-none ${s.cls}`}>{s.sym}</span>
+        </div>
+      );
+    };
+
+    const CardPicker = ({ value, onChange }) => {
+      const [open, setOpen] = useState(false);
+      const [tempSuit, setTempSuit] = useState(null);
+      const ref = useRef(null);
+
+      useEffect(() => {
+        const handler = (e) => { if(ref.current && !ref.current.contains(e.target)) { setOpen(false); setTempSuit(null); }};
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+      }, []);
+
+      const SUIT_UI = [
+        {key:'s',sym:'♠',bg:'hover:bg-gray-600',sel:'bg-gray-600',tc:'text-gray-100'},
+        {key:'h',sym:'♥',bg:'hover:bg-red-900',sel:'bg-red-800',tc:'text-red-400'},
+        {key:'d',sym:'♦',bg:'hover:bg-red-900',sel:'bg-red-800',tc:'text-red-400'},
+        {key:'c',sym:'♣',bg:'hover:bg-gray-600',sel:'bg-gray-600',tc:'text-gray-100'},
+      ];
+
+      return (
+        <div className="relative" ref={ref}>
+          <div onClick={()=>{setOpen(!open);setTempSuit(null);}} className="cursor-pointer">
+            <CardDisplay card={value}/>
+          </div>
+          {open && (
+            <div className="absolute z-50 bg-gray-800 border border-gray-600 rounded-xl p-3 shadow-2xl" style={{minWidth:'200px',top:'48px',left:'0'}}>
+              {value && <button onClick={()=>{onChange(null);setOpen(false);}} className="w-full text-xs text-gray-500 hover:text-red-400 mb-2 text-left">✕ クリア</button>}
+              <div className="text-gray-500 text-xs mb-1">{tempSuit?'ランクを選択':'スートを選択'}</div>
+              <div className="flex gap-1 mb-2">
+                {SUIT_UI.map(s=>(
+                  <button key={s.key} onClick={()=>setTempSuit(s.key)}
+                    className={`flex-1 py-1.5 rounded text-lg font-bold transition-colors ${s.tc} ${tempSuit===s.key?s.sel:s.bg} bg-gray-700`}>
+                    {s.sym}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {RANKS.map(r=>(
+                  <button key={r} onClick={()=>{ if(tempSuit){ onChange({suit:tempSuit,rank:r}); setOpen(false); setTempSuit(null); }}}
+                    className={`py-1 rounded text-xs font-bold transition-colors ${tempSuit?'bg-gray-700 hover:bg-blue-600 text-white cursor-pointer':'bg-gray-700/40 text-gray-600 cursor-default'}`}>
+                    {r}
+                  </button>
+                ))}
+              </div>
+              {!tempSuit&&<p className="text-gray-600 text-xs mt-2 text-center">↑ まずスートを選んでください</p>}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // HAND REVIEW
+    // ══════════════════════════════════════════════════════════════════════
+    const HandReviewForm = ({ review, onSave, onCancel }) => {
+      const isEdit = !!review;
+      const [form, setForm] = useState(() => {
+        if (review) return { ...review, resultBb: review.resultBb != null ? String(review.resultBb) : '',
+          heroHand: Array.isArray(review.heroHand) ? review.heroHand : [null,null],
+          villainHand: Array.isArray(review.villainHand) ? review.villainHand : [null,null],
+          flopBoard: Array.isArray(review.flopBoard) ? review.flopBoard : [null,null,null],
+        };
+        return { date:todayStr(), heroPosition:'BTN', villainPosition:'BB',
+          heroHand:[null,null], villainHand:[null,null], flopBoard:[null,null,null],
+          turnCard:null, riverCard:null,
+          preflopPotBb:'', preflopAction:'', preflopMemo:'',
+          flopPotBb:'',   flopAction:'',   flopMemo:'',
+          turnPotBb:'',   turnAction:'',   turnMemo:'',
+          riverPotBb:'',  riverAction:'',  riverMemo:'',
+          resultBb:'', notes:'',
+        };
+      });
+      const set = (k,v) => setForm(f=>({...f,[k]:v}));
+      const setCard = (field, idx, card) => setForm(f=>{
+        const arr = [...(Array.isArray(f[field])?f[field]:[])];
+        arr[idx] = card; return {...f,[field]:arr};
+      });
+
+      const submit = () => {
+        if (!form.date) { alert('日付を入力してください'); return; }
+        onSave({ ...form, id: form.id||uid(),
+          preflopPotBb: parseFloat(form.preflopPotBb)||0,
+          flopPotBb:    parseFloat(form.flopPotBb)||0,
+          turnPotBb:    parseFloat(form.turnPotBb)||0,
+          riverPotBb:   parseFloat(form.riverPotBb)||0,
+          resultBb: form.resultBb!==''&&form.resultBb!==null ? parseFloat(form.resultBb) : null,
+        });
+      };
+
+      const ta = "bg-gray-750 bg-gray-700/80 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-purple-500 focus:outline-none resize-none w-full h-full";
+      const potInp = "w-14 bg-gray-700 text-white rounded px-2 py-1 text-xs border border-gray-600 focus:border-purple-500 focus:outline-none text-center";
+      const sel = "bg-gray-700 text-white rounded px-2 py-1 text-xs border border-gray-600 focus:border-purple-500 focus:outline-none flex-1";
+
+      const StreetRow = ({ label, color='text-gray-400', leftContent, potBb, onPotChange, action, onAction, memo, onMemo, minH='140px' }) => (
+        <div className="grid border-t border-gray-700/60" style={{gridTemplateColumns:'18% 12% 70%'}}>
+          <div className="border-r border-gray-700/60 p-3 space-y-2">
+            <div className="flex items-center justify-between mb-1">
+              <span className={`text-xs font-bold uppercase tracking-wider ${color}`}>{label}</span>
+              <div className="flex items-center gap-1">
+                <input type="number" value={potBb} onChange={e=>onPotChange(e.target.value)}
+                  step="0.5" min="0" placeholder="0" className={potInp}/>
+                <span className="text-gray-600 text-xs">BB</span>
+              </div>
+            </div>
+            {leftContent}
+          </div>
+          <div className="border-r border-gray-700/60 p-2" style={{minHeight:minH}}>
+            <textarea value={action} onChange={e=>onAction(e.target.value)} placeholder="アクション" className={ta} style={{minHeight:minH}}/>
+          </div>
+          <div className="p-2" style={{minHeight:minH}}>
+            <textarea value={memo} onChange={e=>onMemo(e.target.value)} placeholder="分析メモ…" className={ta} style={{minHeight:minH}}/>
+          </div>
+        </div>
+      );
+
+      return (
+        <div className="bg-gray-800 rounded-xl overflow-hidden slide-in border border-gray-700">
+          {/* Header */}
+          <div className="px-5 py-3 bg-gray-700/40 border-b border-gray-700 flex items-center justify-between gap-4 flex-wrap">
+            <h3 className="text-white font-bold text-sm">{isEdit?'✏️ ハンド編集':'➕ ハンドレビュー追加'}</h3>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <label className="text-gray-400 text-xs">日付</label>
+                <input type="date" value={form.date} onChange={e=>set('date',e.target.value)}
+                  className="bg-gray-700 text-white rounded px-2 py-1 text-xs border border-gray-600 focus:outline-none"/>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-gray-400 text-xs">結果 (BB)</label>
+                <input type="number" value={form.resultBb} onChange={e=>set('resultBb',e.target.value)} step="0.1" placeholder="±0.0"
+                  className="w-20 bg-gray-700 text-white rounded px-2 py-1 text-xs border border-gray-600 focus:outline-none"/>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={onCancel} className="px-3 py-1.5 text-gray-400 hover:text-white text-xs">キャンセル</button>
+                <button onClick={submit} className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-1.5 rounded-lg text-xs font-bold">保存</button>
+              </div>
+            </div>
+          </div>
+          {/* Column headers */}
+          <div className="grid bg-gray-700/20 border-b border-gray-700/60" style={{gridTemplateColumns:'18% 12% 70%'}}>
+            {['ストリート / ボード','アクション','分析メモ（70%）'].map((h,i)=>(
+              <div key={h} className={`px-3 py-1.5 text-xs text-gray-500 font-medium ${i<2?'border-r border-gray-700/60':''}`}>{h}</div>
+            ))}
+          </div>
+          {/* Preflop */}
+          <StreetRow label="PREFLOP" color="text-yellow-400" minH="180px"
+            potBb={form.preflopPotBb} onPotChange={v=>set('preflopPotBb',v)}
+            action={form.preflopAction} onAction={v=>set('preflopAction',v)}
+            memo={form.preflopMemo} onMemo={v=>set('preflopMemo',v)}
+            leftContent={<div className="space-y-2">
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500 text-xs w-10">Hero</span>
+                <select value={form.heroPosition} onChange={e=>set('heroPosition',e.target.value)} className={sel}>
+                  {POSITIONS.map(p=><option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500 text-xs w-10">Vil.</span>
+                <select value={form.villainPosition} onChange={e=>set('villainPosition',e.target.value)} className={sel}>
+                  {POSITIONS.map(p=><option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <div>
+                <div className="text-gray-600 text-xs mb-1">Hero Hand</div>
+                <div className="flex gap-1">{[0,1].map(i=><CardPicker key={i} value={form.heroHand[i]} onChange={c=>setCard('heroHand',i,c)}/>)}</div>
+              </div>
+              <div>
+                <div className="text-gray-600 text-xs mb-1">Villain Hand</div>
+                <div className="flex gap-1">{[0,1].map(i=><CardPicker key={i} value={form.villainHand[i]} onChange={c=>setCard('villainHand',i,c)}/>)}</div>
+              </div>
+            </div>}
+          />
+          {/* Flop */}
+          <StreetRow label="FLOP" color="text-blue-400" minH="130px"
+            potBb={form.flopPotBb} onPotChange={v=>set('flopPotBb',v)}
+            action={form.flopAction} onAction={v=>set('flopAction',v)}
+            memo={form.flopMemo} onMemo={v=>set('flopMemo',v)}
+            leftContent={<div className="flex gap-1 flex-wrap">{[0,1,2].map(i=><CardPicker key={i} value={form.flopBoard[i]} onChange={c=>setCard('flopBoard',i,c)}/>)}</div>}
+          />
+          {/* Turn */}
+          <StreetRow label="TURN" color="text-orange-400" minH="100px"
+            potBb={form.turnPotBb} onPotChange={v=>set('turnPotBb',v)}
+            action={form.turnAction} onAction={v=>set('turnAction',v)}
+            memo={form.turnMemo} onMemo={v=>set('turnMemo',v)}
+            leftContent={<CardPicker value={form.turnCard} onChange={c=>set('turnCard',c)}/>}
+          />
+          {/* River */}
+          <StreetRow label="RIVER" color="text-red-400" minH="100px"
+            potBb={form.riverPotBb} onPotChange={v=>set('riverPotBb',v)}
+            action={form.riverAction} onAction={v=>set('riverAction',v)}
+            memo={form.riverMemo} onMemo={v=>set('riverMemo',v)}
+            leftContent={<CardPicker value={form.riverCard} onChange={c=>set('riverCard',c)}/>}
+          />
+          {/* Notes */}
+          <div className="px-5 py-3 border-t border-gray-700">
+            <label className="text-gray-400 text-xs mb-1 block">総評・メモ</label>
+            <textarea value={form.notes} onChange={e=>set('notes',e.target.value)} rows={2} placeholder="ハンド全体の振り返り…"
+              className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-purple-500 focus:outline-none resize-none"/>
+          </div>
+        </div>
+      );
+    };
+
+    const HandReviewPage = ({ reviews, onAdd, onUpdate, onDelete }) => {
+      const [showForm, setShowForm] = useState(false);
+      const [editing,  setEditing]  = useState(null);
+      const [deleting, setDeleting] = useState(null);
+      const [calMonth, setCalMonth] = useState(thisMonth());
+
+      const monthReviews = reviews.filter(r=>r.date.startsWith(calMonth));
+      const monthOpts = useMemo(()=>{
+        const s=new Set([thisMonth()]); reviews.forEach(r=>s.add(r.date.slice(0,7)));
+        return [...s].sort().reverse();
+      },[reviews]);
+
+      const handleSave = async (data) => {
+        if (editing) { await onUpdate(data); setEditing(null); }
+        else { await onAdd(data); setShowForm(false); }
+      };
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h3 className="text-white font-bold">🎴 ハンドレビュー</h3>
+              <p className="text-gray-500 text-xs mt-0.5">{reviews.length} ハンド記録済み</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <select value={calMonth} onChange={e=>setCalMonth(e.target.value)}
+                className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm border border-gray-700 focus:outline-none">
+                {monthOpts.map(m=><option key={m} value={m}>{m}</option>)}
+              </select>
+              <button onClick={()=>{setShowForm(true);setEditing(null);}}
+                className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2 rounded-lg text-sm">＋ 追加</button>
+            </div>
+          </div>
+
+          {(showForm||editing)&&<HandReviewForm review={editing} onSave={handleSave} onCancel={()=>{setShowForm(false);setEditing(null);}}/>}
+
+          <div className="bg-gray-800 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-700">
+              <h4 className="text-white font-semibold text-sm">{calMonth} のハンド ({monthReviews.length})</h4>
+            </div>
+            {monthReviews.length===0
+              ? <div className="p-8 text-center text-gray-600 text-sm">この月のハンドレビューはありません</div>
+              : <div className="divide-y divide-gray-700">
+                  {[...monthReviews].map(r=>{
+                    const hand = (cards) => (Array.isArray(cards)?cards:[]).filter(Boolean).map((c,i)=><CardDisplay key={i} card={c}/>);
+                    return (
+                      <div key={r.id} className="px-4 py-3 hover:bg-gray-700/30 transition-colors">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className="text-gray-400 text-xs font-mono">{fmtDate(r.date)}</span>
+                          <div className="flex gap-1">{hand(r.heroHand)}</div>
+                          <span className="text-gray-600 text-xs">vs</span>
+                          <div className="flex gap-1">{hand(r.villainHand)}</div>
+                          <span className="text-gray-500 text-xs">{r.heroPosition} → {r.villainPosition}</span>
+                          {r.resultBb!=null&&<span className={`font-mono text-sm font-bold ${r.resultBb>0?'text-emerald-400':r.resultBb<0?'text-red-400':'text-gray-400'}`}>{r.resultBb>0?'+':''}{r.resultBb.toFixed(1)} BB</span>}
+                          {(Array.isArray(r.flopBoard)&&r.flopBoard.some(Boolean))&&(
+                            <div className="flex gap-1">{hand(r.flopBoard)}{r.turnCard&&<CardDisplay card={r.turnCard}/>}{r.riverCard&&<CardDisplay card={r.riverCard}/>}</div>
+                          )}
+                          <div className="ml-auto flex gap-2">
+                            <button onClick={()=>setEditing(r)} className="text-gray-500 hover:text-blue-400 text-xs px-2 py-1">編集</button>
+                            <button onClick={()=>setDeleting(r.id)} className="text-gray-500 hover:text-red-400 text-xs px-2 py-1">削除</button>
+                          </div>
+                        </div>
+                        {r.notes&&<div className="text-gray-600 text-xs mt-1 ml-0 truncate">{r.notes}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+            }
+          </div>
+
+          {deleting&&(
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+              <div className="bg-gray-800 rounded-xl p-6 space-y-4 max-w-sm w-full">
+                <h3 className="text-white font-bold">削除確認</h3>
+                <p className="text-gray-400 text-sm">このハンドを削除しますか？</p>
+                <div className="flex gap-3 justify-end">
+                  <button onClick={()=>setDeleting(null)} className="text-gray-400 px-4 py-2 text-sm">キャンセル</button>
+                  <button onClick={()=>{onDelete(deleting);setDeleting(null);}} className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold">削除</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     };
@@ -1337,7 +1634,8 @@
       { key:'gto',     label:'1ハンドGTO分析する',       auto:false },
     ];
 
-    const PokerPage = ({ sessions, checkins, onAdd, onUpdate, onDelete, onCheckin }) => {
+    const PokerPage = ({ sessions, checkins, handReviews, onAdd, onUpdate, onDelete, onCheckin, onAddHand, onUpdateHand, onDeleteHand }) => {
+      const [pokerTab, setPokerTab] = useState('sessions');
       const [showForm, setShowForm] = useState(false);
       const [editing,  setEditing]  = useState(null);
       const [deleting, setDeleting] = useState(null);
@@ -1398,7 +1696,19 @@
       ];
 
       return (
-        <div className="space-y-6">
+        <div className="space-y-4">
+          {/* Poker sub-tabs */}
+          <div className="flex gap-2">
+            {[{key:'sessions',label:'📋 セッション'},{key:'hands',label:'🎴 ハンドレビュー'}].map(t=>(
+              <button key={t.key} onClick={()=>setPokerTab(t.key)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${pokerTab===t.key?'bg-purple-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {pokerTab==='hands'&&<HandReviewPage reviews={handReviews} onAdd={onAddHand} onUpdate={onUpdateHand} onDelete={onDeleteHand}/>}
+          {pokerTab==='sessions'&&<div className="space-y-6">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
               <h2 className="text-white font-bold text-lg">🃏 Poker</h2>
@@ -1556,6 +1866,7 @@
               </div>
             </div>
           )}
+          </div>}
         </div>
       );
     };
@@ -1851,6 +2162,83 @@
     };
 
     // ══════════════════════════════════════════════════════════════════════
+    // CALENDAR CHART
+    // ══════════════════════════════════════════════════════════════════════
+    const CalendarChart = ({ month, dayData, daysInMon, filters, graphRange, pokerSessions, trades, predictionBets }) => {
+      const chartRef = useRef(null);
+      const instRef  = useRef(null);
+      const today    = todayStr();
+
+      const monthlyData = useMemo(()=>{
+        const cutoff = month===thisMonth() ? parseInt(today.split('-')[2]) : daysInMon;
+        let cum=0; const vals=[]; const labels=[];
+        for(let d=1;d<=cutoff;d++){
+          const ds=`${month}-${String(d).padStart(2,'0')}`;
+          const bd=dayData[ds]||{};
+          const t=BUSINESSES.filter(b=>filters.has(b.key)).reduce((s,b)=>s+(bd[b.key]||0),0);
+          cum+=t; vals.push(parseFloat(cum.toFixed(2))); labels.push(`${d}日`);
+        }
+        return {vals,labels};
+      },[dayData,filters,daysInMon,month,today]);
+
+      const alltimeData = useMemo(()=>{
+        const dm={};
+        const add=(d,biz,amt)=>{ if(d>today)return; if(!dm[d])dm[d]={}; dm[d][biz]=(dm[d][biz]||0)+amt; };
+        pokerSessions.forEach(s=>add(s.date,'poker',s.resultBb*s.bbSize));
+        trades.filter(t=>t.status!=='pending').forEach(t=>add(t.date,'invest',netPnl(t)));
+        predictionBets.filter(b=>b.resultUsd!=null).forEach(b=>add(b.date,'predict',b.resultUsd));
+        const dates=Object.keys(dm).sort();
+        if(!dates.length) return {vals:[],labels:[]};
+        let cum=0;
+        const vals=dates.map(d=>{
+          const t=BUSINESSES.filter(b=>filters.has(b.key)).reduce((s,b)=>s+(dm[d][b.key]||0),0);
+          cum+=t; return parseFloat(cum.toFixed(2));
+        });
+        return {vals,labels:dates.map(d=>d.slice(5))};
+      },[pokerSessions,trades,predictionBets,filters,today]);
+
+      const cd = graphRange==='alltime' ? alltimeData : monthlyData;
+
+      useEffect(()=>{
+        if(!chartRef.current||!cd.vals.length){if(instRef.current){instRef.current.destroy();instRef.current=null;}return;}
+        if(instRef.current) instRef.current.destroy();
+        instRef.current=new Chart(chartRef.current,{
+          type:'line',
+          data:{labels:cd.labels,datasets:[{
+            data:cd.vals, borderWidth:2, pointRadius:2, pointHoverRadius:4, fill:true, tension:0.3,
+            segment:{borderColor:ctx=>cd.vals[ctx.p1DataIndex]>=0?'#34d399':'#f87171'},
+            backgroundColor:ctx=>{const g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);g.addColorStop(0,'rgba(96,165,250,0.25)');g.addColorStop(1,'rgba(96,165,250,0)');return g;},
+          }]},
+          options:{
+            responsive:true,maintainAspectRatio:false,
+            plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`$${c.parsed.y.toFixed(2)}`}}},
+            scales:{
+              x:{ticks:{color:'#6b7280',font:{size:10},maxTicksLimit:20},grid:{color:'rgba(255,255,255,0.04)'}},
+              y:{ticks:{color:'#6b7280',font:{size:10},callback:v=>`$${v.toFixed(0)}`},grid:{color:'rgba(255,255,255,0.06)'},
+                afterDataLimits:s=>{const p=Math.abs(s.max-s.min)*0.1||5;s.max+=p;s.min-=p;}}
+            }
+          }
+        });
+        return ()=>{if(instRef.current)instRef.current.destroy();};
+      },[cd]);
+
+      const last=cd.vals[cd.vals.length-1]||0;
+      return (
+        <div className="bg-gray-800 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-white font-semibold text-sm">📈 累計損益推移</h3>
+            <span className={`font-bold font-mono text-sm ${last>=0?'text-emerald-400':'text-red-400'}`}>{last>=0?'+':''}{last.toFixed(2)}$</span>
+          </div>
+          <div style={{height:'140px'}}>
+            {cd.vals.length>0
+              ? <canvas ref={chartRef}/>
+              : <div className="flex items-center justify-center h-full text-gray-600 text-sm">データがありません</div>}
+          </div>
+        </div>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
     // CALENDAR PAGE
     // ══════════════════════════════════════════════════════════════════════
     const BUSINESSES = [
@@ -1865,6 +2253,7 @@
       const [month,       setMonth]       = useState(thisMonth());
       const [filters,     setFilters]     = useState(new Set(['poker','invest','keiba','predict','toreka']));
       const [selectedDay, setSelectedDay] = useState(null);
+      const [graphRange,  setGraphRange]  = useState('monthly');
 
       const toggleFilter = (key) => setFilters(f=>{const n=new Set(f);n.has(key)?n.delete(key):n.add(key);return n;});
 
@@ -1905,10 +2294,19 @@
               <h2 className="text-white font-bold text-lg">📅 カレンダー</h2>
               <p className="text-gray-500 text-xs mt-0.5">月次損益カレンダー（日付をクリックで詳細）</p>
             </div>
-            <select value={month} onChange={e=>{setMonth(e.target.value);setSelectedDay(null);}}
-              className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none">
+            <div className="flex items-center gap-2">
+              {/* Graph range toggle */}
+              <div className="flex rounded-lg overflow-hidden border border-gray-700">
+                {[{k:'monthly',l:'月次'},{k:'alltime',l:'全期間'}].map(({k,l})=>(
+                  <button key={k} onClick={()=>setGraphRange(k)}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${graphRange===k?'bg-indigo-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>{l}</button>
+                ))}
+              </div>
+              <select value={month} onChange={e=>{setMonth(e.target.value);setSelectedDay(null);}}
+                className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none">
               {monthOpts.map(m=><option key={m} value={m}>{m}</option>)}
-            </select>
+              </select>
+            </div>
           </div>
 
           {/* Filter buttons */}
@@ -1936,74 +2334,11 @@
           </div>
 
           {/* Cumulative P&L chart */}
-          {(()=>{
-            const chartRef = React.useRef(null);
-            const instRef  = React.useRef(null);
-            const cumData  = React.useMemo(()=>{
-              let cum=0; const vals=[]; const labels=[];
-              for(let d=1;d<=daysInMon;d++){
-                const ds=`${month}-${String(d).padStart(2,'0')}`;
-                const bd=dayData[ds]||{};
-                const dayTotal=BUSINESSES.filter(b=>filters.has(b.key)).reduce((s,b)=>s+(bd[b.key]||0),0);
-                cum+=dayTotal; vals.push(parseFloat(cum.toFixed(2))); labels.push(`${d}日`);
-              }
-              return {vals,labels};
-            },[dayData,filters,daysInMon,month]);
-
-            React.useEffect(()=>{
-              if(!chartRef.current) return;
-              if(instRef.current) instRef.current.destroy();
-              const pos=cumData.vals.map(v=>v>=0?'rgba(52,211,153,0.15)':null);
-              const neg=cumData.vals.map(v=>v<0?'rgba(248,113,113,0.15)':null);
-              instRef.current=new Chart(chartRef.current,{
-                type:'line',
-                data:{
-                  labels:cumData.labels,
-                  datasets:[{
-                    data:cumData.vals,
-                    borderColor:'#60a5fa',
-                    backgroundColor:(ctx)=>{
-                      const g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);
-                      g.addColorStop(0,'rgba(96,165,250,0.25)');
-                      g.addColorStop(1,'rgba(96,165,250,0)');
-                      return g;
-                    },
-                    borderWidth:2, pointRadius:2, pointHoverRadius:4,
-                    fill:true, tension:0.3,
-                    segment:{
-                      borderColor:ctx=>cumData.vals[ctx.p1DataIndex]>=0?'#34d399':'#f87171',
-                    },
-                  }]
-                },
-                options:{
-                  responsive:true, maintainAspectRatio:false,
-                  plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`$${c.parsed.y.toFixed(2)}`}}},
-                  scales:{
-                    x:{ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}},
-                    y:{ticks:{color:'#6b7280',font:{size:10},callback:v=>`$${v.toFixed(0)}`},grid:{color:'rgba(255,255,255,0.06)'},
-                      afterDataLimits:scale=>{const pad=Math.abs(scale.max-scale.min)*0.1||5;scale.max+=pad;scale.min-=pad;}
-                    }
-                  }
-                }
-              });
-              return ()=>{if(instRef.current)instRef.current.destroy();};
-            },[cumData]);
-
-            const lastVal=cumData.vals[cumData.vals.length-1]||0;
-            return (
-              <div className="bg-gray-800 rounded-xl p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-white font-semibold text-sm">📈 累計損益推移（月初来）</h3>
-                  <span className={`font-bold font-mono text-sm ${lastVal>=0?'text-emerald-400':'text-red-400'}`}>
-                    {lastVal>=0?'+':''}{lastVal.toFixed(2)}$
-                  </span>
-                </div>
-                <div style={{height:'140px'}}>
-                  <canvas ref={chartRef}/>
-                </div>
-              </div>
-            );
-          })()}
+          <CalendarChart
+            month={month} dayData={dayData} daysInMon={daysInMon}
+            filters={filters} graphRange={graphRange}
+            pokerSessions={pokerSessions} trades={trades} predictionBets={predictionBets}
+          />
 
           {/* Calendar grid */}
           <div className="bg-gray-800 rounded-xl overflow-hidden">
@@ -2091,8 +2426,7 @@
     const TABS = [
       {key:'dashboard',label:'📊 ダッシュボード'},
       {key:'entry',    label:'🎯 エントリー判定'},
-      {key:'real',     label:'📝 リアルトレード'},
-      {key:'demo',     label:'🎮 デモトレード'},
+      {key:'real',     label:'📝 トレード記録'},
       {key:'settings', label:'⚙️ 設定'},
     ];
 
@@ -2108,6 +2442,7 @@
       const [demoTrades,     setDemoTrades]      = useState([]);
       const [pokerSessions,  setPokerSessions]   = useState([]);
       const [pokerCheckins,  setPokerCheckins]   = useState({});
+      const [handReviews,    setHandReviews]     = useState([]);
       const [predictionBets, setPredictionBets]  = useState([]);
       const [settings,       setSettings]        = useState(DEFAULT_SETTINGS);
       const [section,        setSection]         = useState('trading');
@@ -2126,8 +2461,9 @@
           api.get('/api/settings'),
           api.get('/api/poker'),
           api.get('/api/poker/checkins'),
+          api.get('/api/poker/hands'),
           api.get('/api/prediction'),
-        ]).then(([t, dt, s, pk, ck, pb]) => {
+        ]).then(([t, dt, s, pk, ck, hr, pb]) => {
           setTrades(t);
           setDemoTrades(dt);
           setSettings({...DEFAULT_SETTINGS, ...s});
@@ -2135,6 +2471,7 @@
           const ckMap = {};
           ck.forEach(c => { ckMap[c.date] = c; });
           setPokerCheckins(ckMap);
+          setHandReviews(hr);
           setPredictionBets(pb);
           setLoading(false);
           // If server has no trades yet, check for local data to migrate
@@ -2212,6 +2549,18 @@
         const c = await api.post('/api/poker/checkins', data);
         setPokerCheckins(ck => ({...ck, [c.date]: c}));
       };
+      const addHandReview = async (review) => {
+        const r = await api.post('/api/poker/hands', review);
+        setHandReviews(hrs => [...hrs, r]);
+      };
+      const updateHandReview = async (review) => {
+        const r = await api.put(`/api/poker/hands/${review.id}`, review);
+        setHandReviews(hrs => hrs.map(h => h.id===review.id ? r : h));
+      };
+      const deleteHandReview = async (id) => {
+        await api.del(`/api/poker/hands/${id}`);
+        setHandReviews(hrs => hrs.filter(h => h.id !== id));
+      };
       const addPredictionBet = async (bet) => {
         const b = await api.post('/api/prediction', bet);
         setPredictionBets(bs => [...bs, b]);
@@ -2266,15 +2615,12 @@
                   </div>
                 </div>
                 <div className="flex items-center gap-5">
-                  {[
-                    {label:'リアル残高',val:realMetrics.currentBalance,base:settings.initialBalance,color:'text-emerald-400'},
-                    {label:'デモ残高',  val:demoMetrics.currentBalance,base:settings.demoInitialBalance,color:'text-indigo-400'},
-                  ].map(({label,val,base,color})=>(
-                    <div key={label} className="text-right hidden sm:block">
-                      <div className="text-gray-600 text-xs">{label}</div>
-                      <div className={`font-bold text-sm font-mono ${val>=base?color:'text-red-400'}`}>${val.toFixed(2)}</div>
+                  <div className="text-right hidden sm:block">
+                    <div className="text-gray-600 text-xs">残高</div>
+                    <div className={`font-bold text-sm font-mono ${realMetrics.currentBalance>=settings.initialBalance?'text-emerald-400':'text-red-400'}`}>
+                      ${realMetrics.currentBalance.toFixed(2)}
                     </div>
-                  ))}
+                  </div>
                 </div>
               </div>
               {/* Top-level section nav */}
@@ -2321,9 +2667,10 @@
             </>}
             {/* Poker section */}
             {section==='poker'&&(
-              <PokerPage sessions={pokerSessions} checkins={pokerCheckins}
+              <PokerPage sessions={pokerSessions} checkins={pokerCheckins} handReviews={handReviews}
                 onAdd={addPokerSession} onUpdate={updatePokerSession} onDelete={deletePokerSession}
-                onCheckin={upsertPokerCheckin}/>
+                onCheckin={upsertPokerCheckin}
+                onAddHand={addHandReview} onUpdateHand={updateHandReview} onDeleteHand={deleteHandReview}/>
             )}
             {/* Prediction section */}
             {section==='predict'&&(
