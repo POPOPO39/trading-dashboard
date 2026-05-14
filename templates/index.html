@@ -719,10 +719,18 @@
     // ══════════════════════════════════════════════════════════════════════
     // TRADE FORM
     // ══════════════════════════════════════════════════════════════════════
+    const TRADE_RULES = [
+      { key:'ruleSplitEntry', label:'分割エントリーをしたか？' },
+      { key:'ruleSlTpSet',    label:'利確・損切りポイントを置いたうえでエントリーしたか' },
+      { key:'ruleChartBasis', label:'チャートを確認して、トレンドライン・フィボナッチ・抵抗線のうちいずれかの根拠でエントリーポイントを決めたか' },
+    ];
+
     const EMPTY_FORM = (prefill) => ({
       date: todayStr(), pair: prefill?.pair||'', result:'win',
       pnl:'', rr: prefill?.rr ? parseFloat(prefill.rr).toFixed(2) : '',
-      commission:'', ruleCompliant:true, notes:'', pending:false,
+      commission:'', lotSize:'',
+      ruleSplitEntry:true, ruleSlTpSet:true, ruleChartBasis:true,
+      notes:'', pending:false,
     });
 
     const TradeForm = ({ onAdd, onCancel, editTrade, prefill, isDemo }) => {
@@ -730,10 +738,14 @@
         if (editTrade) {
           return {
             ...editTrade,
-            pnl:        Math.abs(editTrade.pnl||0).toString(),
-            commission: (editTrade.commission||0).toString(),
-            rr:         editTrade.rr>0 ? editTrade.rr.toString() : '',
-            pending:    editTrade.status === 'pending',
+            pnl:            Math.abs(editTrade.pnl||0).toString(),
+            commission:     (editTrade.commission||0).toString(),
+            rr:             editTrade.rr>0 ? editTrade.rr.toString() : '',
+            lotSize:        (editTrade.lotSize||0) > 0 ? editTrade.lotSize.toString() : '',
+            ruleSplitEntry: editTrade.ruleSplitEntry ?? true,
+            ruleSlTpSet:    editTrade.ruleSlTpSet    ?? true,
+            ruleChartBasis: editTrade.ruleChartBasis ?? true,
+            pending:        editTrade.status === 'pending',
           };
         }
         return EMPTY_FORM(prefill);
@@ -759,9 +771,13 @@
           result:       form.pending ? 'pending' : form.result,
           pnl:          form.pending ? 0 : (form.result==='loss'?-Math.abs(pnlVal):Math.abs(pnlVal)),
           commission:   commVal,
-          rr:           parseFloat(form.rr)||0,
-          ruleCompliant:form.ruleCompliant,
-          notes:        form.notes.trim(),
+          rr:             parseFloat(form.rr)||0,
+          lotSize:        parseFloat(form.lotSize)||0,
+          ruleSplitEntry: form.ruleSplitEntry,
+          ruleSlTpSet:    form.ruleSlTpSet,
+          ruleChartBasis: form.ruleChartBasis,
+          ruleCompliant:  form.ruleSplitEntry && form.ruleSlTpSet && form.ruleChartBasis,
+          notes:          form.notes.trim(),
           status:       form.pending ? 'pending' : 'closed',
         });
       };
@@ -840,15 +856,30 @@
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-gray-400 text-xs mb-1">RR比 <span className="text-gray-600">(例: 2 → 1:2)</span></label>
-              <input type="number" step="0.1" min="0" placeholder="2.0" value={form.rr} onChange={e=>set('rr',e.target.value)} className={inp} />
+              <label className="block text-gray-400 text-xs mb-1">RR比 <span className="text-gray-600">(例: 2.50 → 1:2.50)</span></label>
+              <input type="number" step="0.01" min="0" placeholder="2.00" value={form.rr} onChange={e=>set('rr',e.target.value)} className={inp} />
             </div>
-            <div className="flex items-end">
-              <label className="flex items-center gap-3 cursor-pointer pb-2">
-                <input type="checkbox" checked={form.ruleCompliant} onChange={e=>set('ruleCompliant',e.target.checked)} className="w-4 h-4 rounded accent-blue-500" />
-                <span className="text-sm text-gray-200">エントリールール遵守</span>
-                {!form.ruleCompliant&&<span className="text-yellow-400 text-xs">⚠️ 違反</span>}
-              </label>
+            <div>
+              <label className="block text-gray-400 text-xs mb-1">ロット数</label>
+              <input type="number" step="0.01" min="0" placeholder="0.10" value={form.lotSize} onChange={e=>set('lotSize',e.target.value)} className={inp} />
+            </div>
+          </div>
+
+          {/* Entry rule checklist */}
+          <div>
+            <label className="block text-gray-400 text-xs mb-2">
+              エントリールール チェックリスト
+              {!(form.ruleSplitEntry&&form.ruleSlTpSet&&form.ruleChartBasis)&&
+                <span className="ml-2 text-yellow-400">⚠️ 未チェック項目あり（ルール違反）</span>}
+            </label>
+            <div className="bg-gray-700/40 rounded-lg p-3 space-y-2">
+              {TRADE_RULES.map(r=>(
+                <label key={r.key} className="flex items-start gap-2.5 cursor-pointer group">
+                  <input type="checkbox" checked={form[r.key]} onChange={e=>set(r.key,e.target.checked)}
+                    className="w-4 h-4 rounded accent-blue-500 mt-0.5 flex-shrink-0"/>
+                  <span className={`text-sm leading-snug ${form[r.key]?'text-gray-200':'text-yellow-400'}`}>{r.label}</span>
+                </label>
+              ))}
             </div>
           </div>
 
@@ -948,9 +979,17 @@
                           {isPending ? <span className="text-amber-500 text-xs">記録待ち</span> : fmt$(nPnl)}
                         </td>
                         <td className="px-4 py-3 text-center text-gray-400 text-xs tabular-nums">
-                          {t.rr>0?`1:${t.rr.toFixed(1)}`:<span className="text-gray-600">—</span>}
+                          {t.rr>0?`1:${t.rr.toFixed(2)}`:<span className="text-gray-600">—</span>}
                         </td>
-                        <td className="px-4 py-3 text-center text-base">{t.ruleCompliant?'✅':'⚠️'}</td>
+                        <td className="px-4 py-3 text-center">
+                          {t.ruleCompliant
+                            ? <span className="text-base">✅</span>
+                            : <span title={[!t.ruleSplitEntry&&'分割未実施',!t.ruleSlTpSet&&'SL/TP未設定',!t.ruleChartBasis&&'根拠なし'].filter(Boolean).join(' / ')}
+                                className="text-yellow-400 text-xs cursor-help">
+                                ⚠️{[!t.ruleSplitEntry&&'分割',!t.ruleSlTpSet&&'SL/TP',!t.ruleChartBasis&&'根拠'].filter(Boolean).join('/')}
+                              </span>
+                          }
+                        </td>
                         <td className="px-4 py-3 text-gray-500 text-xs max-w-[130px] truncate">{t.notes||<span className="text-gray-700">—</span>}</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-2 whitespace-nowrap">
@@ -1824,7 +1863,7 @@
 
     const CalendarPage = ({ pokerSessions, trades, predictionBets }) => {
       const [month,       setMonth]       = useState(thisMonth());
-      const [filters,     setFilters]     = useState(new Set(['poker','invest']));
+      const [filters,     setFilters]     = useState(new Set(['poker','invest','keiba','predict','toreka']));
       const [selectedDay, setSelectedDay] = useState(null);
 
       const toggleFilter = (key) => setFilters(f=>{const n=new Set(f);n.has(key)?n.delete(key):n.add(key);return n;});
@@ -1895,6 +1934,76 @@
               );
             })}
           </div>
+
+          {/* Cumulative P&L chart */}
+          {(()=>{
+            const chartRef = React.useRef(null);
+            const instRef  = React.useRef(null);
+            const cumData  = React.useMemo(()=>{
+              let cum=0; const vals=[]; const labels=[];
+              for(let d=1;d<=daysInMon;d++){
+                const ds=`${month}-${String(d).padStart(2,'0')}`;
+                const bd=dayData[ds]||{};
+                const dayTotal=BUSINESSES.filter(b=>filters.has(b.key)).reduce((s,b)=>s+(bd[b.key]||0),0);
+                cum+=dayTotal; vals.push(parseFloat(cum.toFixed(2))); labels.push(`${d}日`);
+              }
+              return {vals,labels};
+            },[dayData,filters,daysInMon,month]);
+
+            React.useEffect(()=>{
+              if(!chartRef.current) return;
+              if(instRef.current) instRef.current.destroy();
+              const pos=cumData.vals.map(v=>v>=0?'rgba(52,211,153,0.15)':null);
+              const neg=cumData.vals.map(v=>v<0?'rgba(248,113,113,0.15)':null);
+              instRef.current=new Chart(chartRef.current,{
+                type:'line',
+                data:{
+                  labels:cumData.labels,
+                  datasets:[{
+                    data:cumData.vals,
+                    borderColor:'#60a5fa',
+                    backgroundColor:(ctx)=>{
+                      const g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);
+                      g.addColorStop(0,'rgba(96,165,250,0.25)');
+                      g.addColorStop(1,'rgba(96,165,250,0)');
+                      return g;
+                    },
+                    borderWidth:2, pointRadius:2, pointHoverRadius:4,
+                    fill:true, tension:0.3,
+                    segment:{
+                      borderColor:ctx=>cumData.vals[ctx.p1DataIndex]>=0?'#34d399':'#f87171',
+                    },
+                  }]
+                },
+                options:{
+                  responsive:true, maintainAspectRatio:false,
+                  plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`$${c.parsed.y.toFixed(2)}`}}},
+                  scales:{
+                    x:{ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}},
+                    y:{ticks:{color:'#6b7280',font:{size:10},callback:v=>`$${v.toFixed(0)}`},grid:{color:'rgba(255,255,255,0.06)'},
+                      afterDataLimits:scale=>{const pad=Math.abs(scale.max-scale.min)*0.1||5;scale.max+=pad;scale.min-=pad;}
+                    }
+                  }
+                }
+              });
+              return ()=>{if(instRef.current)instRef.current.destroy();};
+            },[cumData]);
+
+            const lastVal=cumData.vals[cumData.vals.length-1]||0;
+            return (
+              <div className="bg-gray-800 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-white font-semibold text-sm">📈 累計損益推移（月初来）</h3>
+                  <span className={`font-bold font-mono text-sm ${lastVal>=0?'text-emerald-400':'text-red-400'}`}>
+                    {lastVal>=0?'+':''}{lastVal.toFixed(2)}$
+                  </span>
+                </div>
+                <div style={{height:'140px'}}>
+                  <canvas ref={chartRef}/>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Calendar grid */}
           <div className="bg-gray-800 rounded-xl overflow-hidden">

@@ -24,17 +24,24 @@ DEFAULT_SETTINGS = {
 }
 
 def row_to_trade(row):
+    split  = row.get('rule_split_entry', True)
+    sl_tp  = row.get('rule_sl_tp_set',   True)
+    chart  = row.get('rule_chart_basis',  True)
     return {
-        'id': row['id'],
-        'date': row['date'],
-        'pair': row['pair'],
-        'result': row['result'],
-        'pnl': row['pnl'],
-        'commission': row['commission'],
-        'rr': row['rr'],
-        'ruleCompliant': row['rule_compliant'],
-        'notes': row['notes'] or '',
-        'status': row['status'],
+        'id':             row['id'],
+        'date':           row['date'],
+        'pair':           row['pair'],
+        'result':         row['result'],
+        'pnl':            row['pnl'],
+        'commission':     row['commission'],
+        'rr':             row['rr'],
+        'lotSize':        row.get('lot_size', 0) or 0,
+        'ruleSplitEntry': split,
+        'ruleSlTpSet':    sl_tp,
+        'ruleChartBasis': chart,
+        'ruleCompliant':  split and sl_tp and chart,
+        'notes':          row['notes'] or '',
+        'status':         row['status'],
     }
 
 def row_to_settings(row):
@@ -79,18 +86,25 @@ def get_trades():
 def add_trade():
     data = request.json
     is_demo = request.args.get('demo', 'false').lower() == 'true'
+    split = bool(data.get('ruleSplitEntry', True))
+    sl_tp = bool(data.get('ruleSlTpSet',    True))
+    chart = bool(data.get('ruleChartBasis', True))
     row = {
-        'id': data['id'],
-        'date': data['date'],
-        'pair': data['pair'],
-        'result': data['result'],
-        'pnl': float(data.get('pnl', 0.0)),
-        'commission': float(data.get('commission', 0.0)),
-        'rr': float(data.get('rr', 0.0)),
-        'rule_compliant': bool(data.get('ruleCompliant', True)),
-        'notes': data.get('notes', ''),
-        'status': data.get('status', 'closed'),
-        'is_demo': is_demo,
+        'id':                data['id'],
+        'date':              data['date'],
+        'pair':              data['pair'],
+        'result':            data['result'],
+        'pnl':               float(data.get('pnl', 0.0)),
+        'commission':        float(data.get('commission', 0.0)),
+        'rr':                float(data.get('rr', 0.0)),
+        'lot_size':          float(data.get('lotSize', 0.0)),
+        'rule_split_entry':  split,
+        'rule_sl_tp_set':    sl_tp,
+        'rule_chart_basis':  chart,
+        'rule_compliant':    split and sl_tp and chart,
+        'notes':             data.get('notes', ''),
+        'status':            data.get('status', 'closed'),
+        'is_demo':           is_demo,
     }
     res = supabase.table('trades').insert(row).execute()
     return jsonify(row_to_trade(res.data[0])), 201
@@ -98,16 +112,23 @@ def add_trade():
 @app.route('/api/trades/<trade_id>', methods=['PUT'])
 def update_trade(trade_id):
     data = request.json
+    split = bool(data.get('ruleSplitEntry', True))
+    sl_tp = bool(data.get('ruleSlTpSet',    True))
+    chart = bool(data.get('ruleChartBasis', True))
     row = {
-        'date': data['date'],
-        'pair': data['pair'],
-        'result': data['result'],
-        'pnl': float(data.get('pnl', 0.0)),
-        'commission': float(data.get('commission', 0.0)),
-        'rr': float(data.get('rr', 0.0)),
-        'rule_compliant': bool(data.get('ruleCompliant', True)),
-        'notes': data.get('notes', ''),
-        'status': data.get('status', 'closed'),
+        'date':             data['date'],
+        'pair':             data['pair'],
+        'result':           data['result'],
+        'pnl':              float(data.get('pnl', 0.0)),
+        'commission':       float(data.get('commission', 0.0)),
+        'rr':               float(data.get('rr', 0.0)),
+        'lot_size':         float(data.get('lotSize', 0.0)),
+        'rule_split_entry': split,
+        'rule_sl_tp_set':   sl_tp,
+        'rule_chart_basis': chart,
+        'rule_compliant':   split and sl_tp and chart,
+        'notes':            data.get('notes', ''),
+        'status':           data.get('status', 'closed'),
     }
     res = supabase.table('trades').update(row).eq('id', trade_id).execute()
     if not res.data:
