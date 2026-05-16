@@ -1337,37 +1337,63 @@
     // ══════════════════════════════════════════════════════════════════════
     // HAND REVIEW
     // ══════════════════════════════════════════════════════════════════════
-    // ── Hand Review: per-player action row (defined outside form for stable identity) ──
-    const HRActionRows = ({ street, players, actsObj, heroPos, vilPos, onSetAct }) => (
-      <div className="space-y-0.5 py-1">
-        {players.map(pos => {
-          const isHero = pos===heroPos, isVil = pos===vilPos;
-          const act = actsObj[pos]||{action:'fold',bet:''};
-          const showBet = act.action==='call'||act.action==='raise';
-          return (
-            <div key={pos} className="flex items-center gap-1 min-h-[22px]">
-              <span className={`text-xs font-bold w-14 text-right flex-shrink-0 ${isHero?'text-green-400':isVil?'text-red-400':'text-gray-500'}`}>
-                {pos}{isHero?' ★':isVil?' ●':''}
-              </span>
-              <select value={act.action}
-                onChange={e=>onSetAct(street, pos, {action:e.target.value, bet:(e.target.value==='fold'||e.target.value==='check')?'':act.bet})}
-                className="bg-gray-700 text-white rounded px-1 py-0.5 text-xs border border-gray-600 focus:border-purple-500 focus:outline-none flex-shrink-0" style={{width:'62px'}}>
-                <option value="fold">Fold</option>
-                <option value="check">Check</option>
-                <option value="call">Call</option>
-                <option value="raise">Raise</option>
-              </select>
-              {showBet&&<>
-                <input type="number" step="0.5" min="0" value={act.bet}
-                  onChange={e=>onSetAct(street, pos, {bet:e.target.value})}
-                  className="w-14 bg-gray-700 text-white rounded px-1.5 py-0.5 text-xs border border-gray-600 focus:border-purple-500 focus:outline-none text-center"/>
-                <span className="text-gray-500 text-xs">bb</span>
-              </>}
-            </div>
-          );
-        })}
-      </div>
-    );
+    // ── Hand Review: ordered action list with add/remove (defined outside form for stable identity) ──
+    const HRActionRows = ({ actions, posOptions, heroPos, vilPos, onSetActions }) => {
+      const posBadge = (pos) =>
+        pos===heroPos ? 'bg-green-900 text-green-300' :
+        pos===vilPos  ? 'bg-red-900 text-red-300' :
+        'bg-gray-700 text-gray-300';
+
+      const addRow = () =>
+        onSetActions([...actions, {position: posOptions[0]||'UTG', action:'fold', bet:''}]);
+
+      const removeRow = (i) =>
+        onSetActions(actions.filter((_,idx)=>idx!==i));
+
+      const updateRow = (i, upd) =>
+        onSetActions(actions.map((a,idx)=>idx===i?{...a,...upd}:a));
+
+      return (
+        <div className="space-y-0.5 py-1">
+          {actions.map((act, i) => {
+            const showBet = act.action==='call'||act.action==='raise';
+            return (
+              <div key={i} className="flex items-center gap-1 min-h-[22px]">
+                <select value={act.position}
+                  onChange={e=>updateRow(i,{position:e.target.value})}
+                  className={`text-xs font-bold rounded px-1 py-0.5 border-0 flex-shrink-0 ${posBadge(act.position)}`}
+                  style={{width:'70px'}}>
+                  {posOptions.map(p=><option key={p} value={p}>{p}</option>)}
+                </select>
+                <select value={act.action}
+                  onChange={e=>updateRow(i,{action:e.target.value, bet:(e.target.value==='fold'||e.target.value==='check')?'':act.bet})}
+                  className="bg-gray-700 text-white rounded px-1 py-0.5 text-xs border border-gray-600 focus:border-purple-500 focus:outline-none flex-shrink-0"
+                  style={{width:'62px'}}>
+                  <option value="fold">Fold</option>
+                  <option value="check">Check</option>
+                  <option value="call">Call</option>
+                  <option value="raise">Raise</option>
+                </select>
+                {showBet&&<>
+                  <input type="number" step="0.5" min="0" value={act.bet}
+                    onChange={e=>updateRow(i,{bet:e.target.value})}
+                    className="w-14 bg-gray-700 text-white rounded px-1.5 py-0.5 text-xs border border-gray-600 focus:border-purple-500 focus:outline-none text-center"/>
+                  <span className="text-gray-500 text-xs">bb</span>
+                </>}
+                <button onClick={()=>removeRow(i)}
+                  className="ml-auto text-gray-600 hover:text-red-400 text-xs leading-none flex-shrink-0 px-1">×</button>
+              </div>
+            );
+          })}
+          {posOptions.length>0&&(
+            <button onClick={addRow}
+              className="text-gray-600 hover:text-purple-400 text-xs mt-0.5 flex items-center gap-0.5">
+              <span>＋</span><span>アクション追加</span>
+            </button>
+          )}
+        </div>
+      );
+    };
 
     // ── Hand Review: street row layout ──
     const HRStreetRow = ({ label, color, leftContent, pot, actionContent, memo, onMemo, minH='110px' }) => (
@@ -1392,35 +1418,28 @@
 
     const HandReviewForm = ({ review, onSave, onCancel }) => {
       const isEdit = !!review;
-      const INIT_ACTS = () => Object.fromEntries(POSITIONS.map(p=>[p,{action:'fold',bet:''}]));
 
-      const parseActsFromStr = (raw) => {
-        const result = INIT_ACTS();
-        try {
-          const parsed = JSON.parse(raw||'{}');
-          if (Array.isArray(parsed.actions)) {
-            parsed.actions.forEach(({position,action,bet})=>{
-              if (position) result[position]={action:action||'fold', bet:bet||''};
-            });
-          }
-        } catch {}
-        return result;
+      const INIT_PREFLOP = () => POSITIONS.map(p=>({position:p, action:'fold', bet:''}));
+      const parseActions = (raw) => {
+        try { const p=JSON.parse(raw||'{}'); return Array.isArray(p.actions)&&p.actions.length?p.actions:[]; }
+        catch { return []; }
       };
 
       const [form, setForm] = useState(() => {
         if (review) {
           let anteData={hasAnte:false,anteBb:1};
           try { const p=JSON.parse(review.preflopAction||'{}'); anteData={hasAnte:!!p.hasAnte,anteBb:p.anteBb||1}; } catch {}
+          const pfa = parseActions(review.preflopAction);
           return {
             date:review.date, heroPosition:review.heroPosition||'BTN', villainPosition:review.villainPosition||'BB',
             heroHand:Array.isArray(review.heroHand)?review.heroHand:[null,null],
             villainHand:Array.isArray(review.villainHand)?review.villainHand:[null,null],
             flopBoard:Array.isArray(review.flopBoard)?review.flopBoard:[null,null,null],
             turnCard:review.turnCard||null, riverCard:review.riverCard||null,
-            preflopActs:parseActsFromStr(review.preflopAction),
-            flopActs:   parseActsFromStr(review.flopAction),
-            turnActs:   parseActsFromStr(review.turnAction),
-            riverActs:  parseActsFromStr(review.riverAction),
+            preflopActions: pfa.length ? pfa : INIT_PREFLOP(),
+            flopActions:    parseActions(review.flopAction),
+            turnActions:    parseActions(review.turnAction),
+            riverActions:   parseActions(review.riverAction),
             hasAnte:anteData.hasAnte, anteBb:anteData.anteBb,
             preflopMemo:review.preflopMemo||'', flopMemo:review.flopMemo||'',
             turnMemo:review.turnMemo||'',       riverMemo:review.riverMemo||'',
@@ -1432,7 +1451,7 @@
           date:todayStr(), heroPosition:'BTN', villainPosition:'BB',
           heroHand:[null,null], villainHand:[null,null], flopBoard:[null,null,null],
           turnCard:null, riverCard:null,
-          preflopActs:INIT_ACTS(), flopActs:INIT_ACTS(), turnActs:INIT_ACTS(), riverActs:INIT_ACTS(),
+          preflopActions:INIT_PREFLOP(), flopActions:[], turnActions:[], riverActions:[],
           hasAnte:false, anteBb:1,
           preflopMemo:'', flopMemo:'', turnMemo:'', riverMemo:'',
           resultBb:'', notes:'',
@@ -1443,54 +1462,49 @@
       const setCard = (field,idx,card) => setForm(f=>{
         const arr=[...(Array.isArray(f[field])?f[field]:[])]; arr[idx]=card; return {...f,[field]:arr};
       });
-      const setAct = (street,pos,upd) => setForm(f=>({
-        ...f,
-        [`${street}Acts`]:{...f[`${street}Acts`],[pos]:{...(f[`${street}Acts`][pos]||{action:'fold',bet:''}), ...upd}}
-      }));
 
-      // Active players per street
-      const flopActive  = useMemo(()=>POSITIONS.filter(p=>form.preflopActs[p]?.action!=='fold'),[form.preflopActs]);
-      const turnActive  = useMemo(()=>flopActive.filter(p=>form.flopActs[p]?.action!=='fold'),[flopActive,form.flopActs]);
-      const riverActive = useMemo(()=>turnActive.filter(p=>form.turnActs[p]?.action!=='fold'),[turnActive,form.turnActs]);
+      // Last action/bet helpers — position can appear multiple times; use rightmost
+      const lastActionOf = (actions, pos) => {
+        for (let i=actions.length-1; i>=0; i--) if(actions[i].position===pos) return actions[i].action;
+        return null;
+      };
+      const lastBetOf = (actions, pos, def) => {
+        for (let i=actions.length-1; i>=0; i--) {
+          if (actions[i].position===pos) {
+            const a=actions[i];
+            return (a.action==='fold'||a.action==='check') ? def : (parseFloat(a.bet)||def);
+          }
+        }
+        return def;
+      };
 
-      // Pot calculations
+      // Active players: last action is not fold (or never appeared = still in)
+      const flopActive  = useMemo(()=>POSITIONS.filter(p=>lastActionOf(form.preflopActions,p)!=='fold'),[form.preflopActions]);
+      const turnActive  = useMemo(()=>flopActive.filter(p=>lastActionOf(form.flopActions,p)!=='fold'),[flopActive,form.flopActions]);
+      const riverActive = useMemo(()=>turnActive.filter(p=>lastActionOf(form.turnActions,p)!=='fold'),[turnActive,form.turnActions]);
+
+      // Pot: sum of last bet per position (SB default 0.5, BB default 1, others 0)
       const preflopPot = useMemo(()=>{
-        const sb=form.preflopActs['SB']||{action:'fold',bet:''};
-        const bb=form.preflopActs['BB']||{action:'fold',bet:''};
-        let pot=0;
-        // SB: fold keeps 0.5bb; call/raise: their total bet overrides the 0.5
-        pot += sb.action==='fold' ? 0.5 : (parseFloat(sb.bet)||0.5);
-        // BB: fold keeps 1bb; check stays 1bb; raise: their total bet overrides the 1
-        pot += (bb.action==='fold'||bb.action==='check') ? 1 : (parseFloat(bb.bet)||1);
-        // Ante
-        if (form.hasAnte) pot += parseFloat(form.anteBb)||1; // BB ante: 1 player only
-        // Other positions
-        POSITIONS.filter(p=>p!=='SB'&&p!=='BB').forEach(p=>{
-          const a=form.preflopActs[p]||{action:'fold'};
-          if (a.action!=='fold') pot+=parseFloat(a.bet)||0;
-        });
+        let pot = lastBetOf(form.preflopActions,'SB',0.5) + lastBetOf(form.preflopActions,'BB',1);
+        if (form.hasAnte) pot += parseFloat(form.anteBb)||1;
+        POSITIONS.filter(p=>p!=='SB'&&p!=='BB').forEach(p=>{ pot+=lastBetOf(form.preflopActions,p,0); });
         return parseFloat(pot.toFixed(2));
-      },[form.preflopActs,form.hasAnte,form.anteBb]);
+      },[form.preflopActions,form.hasAnte,form.anteBb]);
 
-      const flopPot = useMemo(()=>{
-        let add=0; flopActive.forEach(p=>{const a=form.flopActs[p]||{action:'fold'};if(a.action!=='fold'&&a.action!=='check')add+=parseFloat(a.bet)||0;});
+      const flopPot  = useMemo(()=>{
+        let add=0; flopActive.forEach(p=>{ add+=lastBetOf(form.flopActions,p,0); });
         return parseFloat((preflopPot+add).toFixed(2));
-      },[preflopPot,form.flopActs,flopActive]);
+      },[preflopPot,form.flopActions,flopActive]);
 
-      const turnPot = useMemo(()=>{
-        let add=0; turnActive.forEach(p=>{const a=form.turnActs[p]||{action:'fold'};if(a.action!=='fold'&&a.action!=='check')add+=parseFloat(a.bet)||0;});
+      const turnPot  = useMemo(()=>{
+        let add=0; turnActive.forEach(p=>{ add+=lastBetOf(form.turnActions,p,0); });
         return parseFloat((flopPot+add).toFixed(2));
-      },[flopPot,form.turnActs,turnActive]);
+      },[flopPot,form.turnActions,turnActive]);
 
       const riverPot = useMemo(()=>{
-        let add=0; riverActive.forEach(p=>{const a=form.riverActs[p]||{action:'fold'};if(a.action!=='fold'&&a.action!=='check')add+=parseFloat(a.bet)||0;});
+        let add=0; riverActive.forEach(p=>{ add+=lastBetOf(form.riverActions,p,0); });
         return parseFloat((turnPot+add).toFixed(2));
-      },[turnPot,form.riverActs,riverActive]);
-
-      const serActs = (acts, players, extra={}) => JSON.stringify({
-        actions: players.map(p=>({position:p, action:acts[p]?.action||'fold', bet:acts[p]?.bet||''})),
-        ...extra
-      });
+      },[turnPot,form.riverActions,riverActive]);
 
       const submit = () => {
         if (!form.date){alert('日付を入力してください');return;}
@@ -1499,10 +1513,10 @@
           heroPosition:form.heroPosition, villainPosition:form.villainPosition,
           heroHand:form.heroHand, villainHand:form.villainHand,
           flopBoard:form.flopBoard, turnCard:form.turnCard, riverCard:form.riverCard,
-          preflopAction:serActs(form.preflopActs, POSITIONS, {hasAnte:form.hasAnte, anteBb:parseFloat(form.anteBb)||1}),
-          flopAction:   serActs(form.flopActs,    flopActive),
-          turnAction:   serActs(form.turnActs,    turnActive),
-          riverAction:  serActs(form.riverActs,   riverActive),
+          preflopAction: JSON.stringify({actions:form.preflopActions, hasAnte:form.hasAnte, anteBb:parseFloat(form.anteBb)||1}),
+          flopAction:    JSON.stringify({actions:form.flopActions}),
+          turnAction:    JSON.stringify({actions:form.turnActions}),
+          riverAction:   JSON.stringify({actions:form.riverActions}),
           preflopPotBb:preflopPot, flopPotBb:flopPot, turnPotBb:turnPot, riverPotBb:riverPot,
           preflopMemo:form.preflopMemo, flopMemo:form.flopMemo,
           turnMemo:form.turnMemo,       riverMemo:form.riverMemo,
@@ -1544,7 +1558,7 @@
           </div>
           {/* Column headers */}
           <div className="grid bg-gray-700/20 border-b border-gray-700/60" style={{gridTemplateColumns:'18% 30% 52%'}}>
-            {['ボード','アクション (★Hero ●Villain)','分析メモ'].map((h,i)=>(
+            {['ボード','アクション (Hero=緑 Villain=赤)','分析メモ'].map((h,i)=>(
               <div key={h} className={`px-3 py-1.5 text-xs text-gray-500 font-medium ${i<2?'border-r border-gray-700/60':''}`}>{h}</div>
             ))}
           </div>
@@ -1573,31 +1587,33 @@
                 <div className="flex gap-1">{[0,1].map(i=><CardPicker key={i} value={form.villainHand[i]} onChange={c=>setCard('villainHand',i,c)}/>)}</div>
               </div>
             </>}
-            actionContent={<HRActionRows street="preflop" players={POSITIONS} actsObj={form.preflopActs} heroPos={form.heroPosition} vilPos={form.villainPosition} onSetAct={setAct}/>}
+            actionContent={<HRActionRows actions={form.preflopActions} posOptions={POSITIONS}
+              heroPos={form.heroPosition} vilPos={form.villainPosition}
+              onSetActions={v=>set('preflopActions',v)}/>}
           />
           {/* FLOP */}
-          <HRStreetRow label="FLOP" color="text-blue-400" pot={flopPot} minH="110px"
+          <HRStreetRow label="FLOP" color="text-blue-400" pot={flopPot} minH="100px"
             memo={form.flopMemo} onMemo={v=>set('flopMemo',v)}
             leftContent={<div className="flex gap-1 flex-wrap">{[0,1,2].map(i=><CardPicker key={i} value={form.flopBoard[i]} onChange={c=>setCard('flopBoard',i,c)}/>)}</div>}
-            actionContent={flopActive.length>0
-              ?<HRActionRows street="flop" players={flopActive} actsObj={form.flopActs} heroPos={form.heroPosition} vilPos={form.villainPosition} onSetAct={setAct}/>
-              :<div className="text-gray-700 text-xs p-2">アクティブなし</div>}
+            actionContent={<HRActionRows actions={form.flopActions} posOptions={flopActive}
+              heroPos={form.heroPosition} vilPos={form.villainPosition}
+              onSetActions={v=>set('flopActions',v)}/>}
           />
           {/* TURN */}
           <HRStreetRow label="TURN" color="text-orange-400" pot={turnPot} minH="80px"
             memo={form.turnMemo} onMemo={v=>set('turnMemo',v)}
             leftContent={<CardPicker value={form.turnCard} onChange={c=>set('turnCard',c)}/>}
-            actionContent={turnActive.length>0
-              ?<HRActionRows street="turn" players={turnActive} actsObj={form.turnActs} heroPos={form.heroPosition} vilPos={form.villainPosition} onSetAct={setAct}/>
-              :<div className="text-gray-700 text-xs p-2">アクティブなし</div>}
+            actionContent={<HRActionRows actions={form.turnActions} posOptions={turnActive}
+              heroPos={form.heroPosition} vilPos={form.villainPosition}
+              onSetActions={v=>set('turnActions',v)}/>}
           />
           {/* RIVER */}
           <HRStreetRow label="RIVER" color="text-red-400" pot={riverPot} minH="80px"
             memo={form.riverMemo} onMemo={v=>set('riverMemo',v)}
             leftContent={<CardPicker value={form.riverCard} onChange={c=>set('riverCard',c)}/>}
-            actionContent={riverActive.length>0
-              ?<HRActionRows street="river" players={riverActive} actsObj={form.riverActs} heroPos={form.heroPosition} vilPos={form.villainPosition} onSetAct={setAct}/>
-              :<div className="text-gray-700 text-xs p-2">アクティブなし</div>}
+            actionContent={<HRActionRows actions={form.riverActions} posOptions={riverActive}
+              heroPos={form.heroPosition} vilPos={form.villainPosition}
+              onSetActions={v=>set('riverActions',v)}/>}
           />
           {/* Notes */}
           <div className="px-5 py-3 border-t border-gray-700">
