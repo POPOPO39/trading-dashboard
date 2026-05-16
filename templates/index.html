@@ -1463,7 +1463,7 @@
         // BB: fold keeps 1bb; check stays 1bb; raise: their total bet overrides the 1
         pot += (bb.action==='fold'||bb.action==='check') ? 1 : (parseFloat(bb.bet)||1);
         // Ante
-        if (form.hasAnte) pot += (parseFloat(form.anteBb)||1)*POSITIONS.length;
+        if (form.hasAnte) pot += parseFloat(form.anteBb)||1; // BB ante: 1 player only
         // Other positions
         POSITIONS.filter(p=>p!=='SB'&&p!=='BB').forEach(p=>{
           const a=form.preflopActs[p]||{action:'fold'};
@@ -1529,7 +1529,7 @@
                 {form.hasAnte&&<>
                   <input type="number" step="0.5" min="0" value={form.anteBb} onChange={e=>set('anteBb',e.target.value)}
                     className={`${inp} w-12 text-center`} placeholder="1"/>
-                  <span className="text-gray-500 text-xs">bb/人</span>
+                  <span className="text-gray-500 text-xs">bb (BBアンティ)</span>
                 </>}
               </label>
               <div className="flex items-center gap-2">
