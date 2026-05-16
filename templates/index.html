@@ -1337,66 +1337,181 @@
     // ══════════════════════════════════════════════════════════════════════
     // HAND REVIEW
     // ══════════════════════════════════════════════════════════════════════
+    // ── Hand Review: per-player action row (defined outside form for stable identity) ──
+    const HRActionRows = ({ street, players, actsObj, heroPos, vilPos, onSetAct }) => (
+      <div className="space-y-0.5 py-1">
+        {players.map(pos => {
+          const isHero = pos===heroPos, isVil = pos===vilPos;
+          const act = actsObj[pos]||{action:'fold',bet:''};
+          const showBet = act.action==='call'||act.action==='raise';
+          return (
+            <div key={pos} className="flex items-center gap-1 min-h-[22px]">
+              <span className={`text-xs font-bold w-14 text-right flex-shrink-0 ${isHero?'text-green-400':isVil?'text-red-400':'text-gray-500'}`}>
+                {pos}{isHero?' ★':isVil?' ●':''}
+              </span>
+              <select value={act.action}
+                onChange={e=>onSetAct(street, pos, {action:e.target.value, bet:(e.target.value==='fold'||e.target.value==='check')?'':act.bet})}
+                className="bg-gray-700 text-white rounded px-1 py-0.5 text-xs border border-gray-600 focus:border-purple-500 focus:outline-none flex-shrink-0" style={{width:'62px'}}>
+                <option value="fold">Fold</option>
+                <option value="check">Check</option>
+                <option value="call">Call</option>
+                <option value="raise">Raise</option>
+              </select>
+              {showBet&&<>
+                <input type="number" step="0.5" min="0" value={act.bet}
+                  onChange={e=>onSetAct(street, pos, {bet:e.target.value})}
+                  className="w-14 bg-gray-700 text-white rounded px-1.5 py-0.5 text-xs border border-gray-600 focus:border-purple-500 focus:outline-none text-center"/>
+                <span className="text-gray-500 text-xs">bb</span>
+              </>}
+            </div>
+          );
+        })}
+      </div>
+    );
+
+    // ── Hand Review: street row layout ──
+    const HRStreetRow = ({ label, color, leftContent, pot, actionContent, memo, onMemo, minH='110px' }) => (
+      <div className="grid border-t border-gray-700/60" style={{gridTemplateColumns:'18% 30% 52%'}}>
+        <div className="border-r border-gray-700/60 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className={`text-xs font-bold uppercase tracking-wider ${color}`}>{label}</span>
+            <span className="text-xs font-mono font-bold text-yellow-300">{typeof pot==='number'?pot.toFixed(1):'0.0'}bb</span>
+          </div>
+          {leftContent}
+        </div>
+        <div className="border-r border-gray-700/60 px-2 py-1 overflow-y-auto" style={{minHeight:minH}}>
+          {actionContent}
+        </div>
+        <div className="p-2" style={{minHeight:minH}}>
+          <textarea value={memo} onChange={e=>onMemo(e.target.value)} placeholder="分析メモ…"
+            className="bg-gray-700/80 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-purple-500 focus:outline-none resize-none w-full"
+            style={{minHeight:minH}}/>
+        </div>
+      </div>
+    );
+
     const HandReviewForm = ({ review, onSave, onCancel }) => {
       const isEdit = !!review;
+      const INIT_ACTS = () => Object.fromEntries(POSITIONS.map(p=>[p,{action:'fold',bet:''}]));
+
+      const parseActsFromStr = (raw) => {
+        const result = INIT_ACTS();
+        try {
+          const parsed = JSON.parse(raw||'{}');
+          if (Array.isArray(parsed.actions)) {
+            parsed.actions.forEach(({position,action,bet})=>{
+              if (position) result[position]={action:action||'fold', bet:bet||''};
+            });
+          }
+        } catch {}
+        return result;
+      };
+
       const [form, setForm] = useState(() => {
-        if (review) return { ...review, resultBb: review.resultBb != null ? String(review.resultBb) : '',
-          heroHand: Array.isArray(review.heroHand) ? review.heroHand : [null,null],
-          villainHand: Array.isArray(review.villainHand) ? review.villainHand : [null,null],
-          flopBoard: Array.isArray(review.flopBoard) ? review.flopBoard : [null,null,null],
-        };
-        return { date:todayStr(), heroPosition:'BTN', villainPosition:'BB',
+        if (review) {
+          let anteData={hasAnte:false,anteBb:1};
+          try { const p=JSON.parse(review.preflopAction||'{}'); anteData={hasAnte:!!p.hasAnte,anteBb:p.anteBb||1}; } catch {}
+          return {
+            date:review.date, heroPosition:review.heroPosition||'BTN', villainPosition:review.villainPosition||'BB',
+            heroHand:Array.isArray(review.heroHand)?review.heroHand:[null,null],
+            villainHand:Array.isArray(review.villainHand)?review.villainHand:[null,null],
+            flopBoard:Array.isArray(review.flopBoard)?review.flopBoard:[null,null,null],
+            turnCard:review.turnCard||null, riverCard:review.riverCard||null,
+            preflopActs:parseActsFromStr(review.preflopAction),
+            flopActs:   parseActsFromStr(review.flopAction),
+            turnActs:   parseActsFromStr(review.turnAction),
+            riverActs:  parseActsFromStr(review.riverAction),
+            hasAnte:anteData.hasAnte, anteBb:anteData.anteBb,
+            preflopMemo:review.preflopMemo||'', flopMemo:review.flopMemo||'',
+            turnMemo:review.turnMemo||'',       riverMemo:review.riverMemo||'',
+            resultBb:review.resultBb!=null?String(review.resultBb):'',
+            notes:review.notes||'', id:review.id,
+          };
+        }
+        return {
+          date:todayStr(), heroPosition:'BTN', villainPosition:'BB',
           heroHand:[null,null], villainHand:[null,null], flopBoard:[null,null,null],
           turnCard:null, riverCard:null,
-          preflopPotBb:'', preflopAction:'', preflopMemo:'',
-          flopPotBb:'',   flopAction:'',   flopMemo:'',
-          turnPotBb:'',   turnAction:'',   turnMemo:'',
-          riverPotBb:'',  riverAction:'',  riverMemo:'',
+          preflopActs:INIT_ACTS(), flopActs:INIT_ACTS(), turnActs:INIT_ACTS(), riverActs:INIT_ACTS(),
+          hasAnte:false, anteBb:1,
+          preflopMemo:'', flopMemo:'', turnMemo:'', riverMemo:'',
           resultBb:'', notes:'',
         };
       });
+
       const set = (k,v) => setForm(f=>({...f,[k]:v}));
-      const setCard = (field, idx, card) => setForm(f=>{
-        const arr = [...(Array.isArray(f[field])?f[field]:[])];
-        arr[idx] = card; return {...f,[field]:arr};
+      const setCard = (field,idx,card) => setForm(f=>{
+        const arr=[...(Array.isArray(f[field])?f[field]:[])]; arr[idx]=card; return {...f,[field]:arr};
+      });
+      const setAct = (street,pos,upd) => setForm(f=>({
+        ...f,
+        [`${street}Acts`]:{...f[`${street}Acts`],[pos]:{...(f[`${street}Acts`][pos]||{action:'fold',bet:''}), ...upd}}
+      }));
+
+      // Active players per street
+      const flopActive  = useMemo(()=>POSITIONS.filter(p=>form.preflopActs[p]?.action!=='fold'),[form.preflopActs]);
+      const turnActive  = useMemo(()=>flopActive.filter(p=>form.flopActs[p]?.action!=='fold'),[flopActive,form.flopActs]);
+      const riverActive = useMemo(()=>turnActive.filter(p=>form.turnActs[p]?.action!=='fold'),[turnActive,form.turnActs]);
+
+      // Pot calculations
+      const preflopPot = useMemo(()=>{
+        const sb=form.preflopActs['SB']||{action:'fold',bet:''};
+        const bb=form.preflopActs['BB']||{action:'fold',bet:''};
+        let pot=0;
+        // SB: fold keeps 0.5bb; call/raise: their total bet overrides the 0.5
+        pot += sb.action==='fold' ? 0.5 : (parseFloat(sb.bet)||0.5);
+        // BB: fold keeps 1bb; check stays 1bb; raise: their total bet overrides the 1
+        pot += (bb.action==='fold'||bb.action==='check') ? 1 : (parseFloat(bb.bet)||1);
+        // Ante
+        if (form.hasAnte) pot += (parseFloat(form.anteBb)||1)*POSITIONS.length;
+        // Other positions
+        POSITIONS.filter(p=>p!=='SB'&&p!=='BB').forEach(p=>{
+          const a=form.preflopActs[p]||{action:'fold'};
+          if (a.action!=='fold') pot+=parseFloat(a.bet)||0;
+        });
+        return parseFloat(pot.toFixed(2));
+      },[form.preflopActs,form.hasAnte,form.anteBb]);
+
+      const flopPot = useMemo(()=>{
+        let add=0; flopActive.forEach(p=>{const a=form.flopActs[p]||{action:'fold'};if(a.action!=='fold'&&a.action!=='check')add+=parseFloat(a.bet)||0;});
+        return parseFloat((preflopPot+add).toFixed(2));
+      },[preflopPot,form.flopActs,flopActive]);
+
+      const turnPot = useMemo(()=>{
+        let add=0; turnActive.forEach(p=>{const a=form.turnActs[p]||{action:'fold'};if(a.action!=='fold'&&a.action!=='check')add+=parseFloat(a.bet)||0;});
+        return parseFloat((flopPot+add).toFixed(2));
+      },[flopPot,form.turnActs,turnActive]);
+
+      const riverPot = useMemo(()=>{
+        let add=0; riverActive.forEach(p=>{const a=form.riverActs[p]||{action:'fold'};if(a.action!=='fold'&&a.action!=='check')add+=parseFloat(a.bet)||0;});
+        return parseFloat((turnPot+add).toFixed(2));
+      },[turnPot,form.riverActs,riverActive]);
+
+      const serActs = (acts, players, extra={}) => JSON.stringify({
+        actions: players.map(p=>({position:p, action:acts[p]?.action||'fold', bet:acts[p]?.bet||''})),
+        ...extra
       });
 
       const submit = () => {
-        if (!form.date) { alert('日付を入力してください'); return; }
-        onSave({ ...form, id: form.id||uid(),
-          preflopPotBb: parseFloat(form.preflopPotBb)||0,
-          flopPotBb:    parseFloat(form.flopPotBb)||0,
-          turnPotBb:    parseFloat(form.turnPotBb)||0,
-          riverPotBb:   parseFloat(form.riverPotBb)||0,
-          resultBb: form.resultBb!==''&&form.resultBb!==null ? parseFloat(form.resultBb) : null,
+        if (!form.date){alert('日付を入力してください');return;}
+        onSave({
+          id:form.id||uid(), date:form.date,
+          heroPosition:form.heroPosition, villainPosition:form.villainPosition,
+          heroHand:form.heroHand, villainHand:form.villainHand,
+          flopBoard:form.flopBoard, turnCard:form.turnCard, riverCard:form.riverCard,
+          preflopAction:serActs(form.preflopActs, POSITIONS, {hasAnte:form.hasAnte, anteBb:parseFloat(form.anteBb)||1}),
+          flopAction:   serActs(form.flopActs,    flopActive),
+          turnAction:   serActs(form.turnActs,    turnActive),
+          riverAction:  serActs(form.riverActs,   riverActive),
+          preflopPotBb:preflopPot, flopPotBb:flopPot, turnPotBb:turnPot, riverPotBb:riverPot,
+          preflopMemo:form.preflopMemo, flopMemo:form.flopMemo,
+          turnMemo:form.turnMemo,       riverMemo:form.riverMemo,
+          resultBb:form.resultBb!==''&&form.resultBb!==null?parseFloat(form.resultBb):null,
+          notes:form.notes,
         });
       };
 
-      const ta = "bg-gray-750 bg-gray-700/80 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-purple-500 focus:outline-none resize-none w-full h-full";
-      const potInp = "w-14 bg-gray-700 text-white rounded px-2 py-1 text-xs border border-gray-600 focus:border-purple-500 focus:outline-none text-center";
-      const sel = "bg-gray-700 text-white rounded px-2 py-1 text-xs border border-gray-600 focus:border-purple-500 focus:outline-none flex-1";
-
-      const StreetRow = ({ label, color='text-gray-400', leftContent, potBb, onPotChange, action, onAction, memo, onMemo, minH='140px' }) => (
-        <div className="grid border-t border-gray-700/60" style={{gridTemplateColumns:'18% 12% 70%'}}>
-          <div className="border-r border-gray-700/60 p-3 space-y-2">
-            <div className="flex items-center justify-between mb-1">
-              <span className={`text-xs font-bold uppercase tracking-wider ${color}`}>{label}</span>
-              <div className="flex items-center gap-1">
-                <input type="number" value={potBb} onChange={e=>onPotChange(e.target.value)}
-                  step="0.5" min="0" placeholder="0" className={potInp}/>
-                <span className="text-gray-600 text-xs">BB</span>
-              </div>
-            </div>
-            {leftContent}
-          </div>
-          <div className="border-r border-gray-700/60 p-2" style={{minHeight:minH}}>
-            <textarea value={action} onChange={e=>onAction(e.target.value)} placeholder="アクション" className={ta} style={{minHeight:minH}}/>
-          </div>
-          <div className="p-2" style={{minHeight:minH}}>
-            <textarea value={memo} onChange={e=>onMemo(e.target.value)} placeholder="分析メモ…" className={ta} style={{minHeight:minH}}/>
-          </div>
-        </div>
-      );
+      const inp = "bg-gray-700 text-white rounded px-2 py-1 text-xs border border-gray-600 focus:border-purple-500 focus:outline-none";
 
       return (
         <div className="bg-gray-800 rounded-xl overflow-hidden slide-in border border-gray-700">
@@ -1406,13 +1521,20 @@
             <div className="flex items-center gap-3 flex-wrap">
               <div className="flex items-center gap-2">
                 <label className="text-gray-400 text-xs">日付</label>
-                <input type="date" value={form.date} onChange={e=>set('date',e.target.value)}
-                  className="bg-gray-700 text-white rounded px-2 py-1 text-xs border border-gray-600 focus:outline-none"/>
+                <input type="date" value={form.date} onChange={e=>set('date',e.target.value)} className={`${inp} w-32`}/>
               </div>
+              <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" checked={form.hasAnte} onChange={e=>set('hasAnte',e.target.checked)} className="w-3.5 h-3.5 accent-purple-500"/>
+                <span className="text-gray-400 text-xs">アンティ</span>
+                {form.hasAnte&&<>
+                  <input type="number" step="0.5" min="0" value={form.anteBb} onChange={e=>set('anteBb',e.target.value)}
+                    className={`${inp} w-12 text-center`} placeholder="1"/>
+                  <span className="text-gray-500 text-xs">bb/人</span>
+                </>}
+              </label>
               <div className="flex items-center gap-2">
                 <label className="text-gray-400 text-xs">結果 (BB)</label>
-                <input type="number" value={form.resultBb} onChange={e=>set('resultBb',e.target.value)} step="0.1" placeholder="±0.0"
-                  className="w-20 bg-gray-700 text-white rounded px-2 py-1 text-xs border border-gray-600 focus:outline-none"/>
+                <input type="number" value={form.resultBb} onChange={e=>set('resultBb',e.target.value)} step="0.1" placeholder="±0.0" className={`${inp} w-20`}/>
               </div>
               <div className="flex gap-2">
                 <button onClick={onCancel} className="px-3 py-1.5 text-gray-400 hover:text-white text-xs">キャンセル</button>
@@ -1421,59 +1543,61 @@
             </div>
           </div>
           {/* Column headers */}
-          <div className="grid bg-gray-700/20 border-b border-gray-700/60" style={{gridTemplateColumns:'18% 12% 70%'}}>
-            {['ストリート / ボード','アクション','分析メモ（70%）'].map((h,i)=>(
+          <div className="grid bg-gray-700/20 border-b border-gray-700/60" style={{gridTemplateColumns:'18% 30% 52%'}}>
+            {['ボード','アクション (★Hero ●Villain)','分析メモ'].map((h,i)=>(
               <div key={h} className={`px-3 py-1.5 text-xs text-gray-500 font-medium ${i<2?'border-r border-gray-700/60':''}`}>{h}</div>
             ))}
           </div>
-          {/* Preflop */}
-          <StreetRow label="PREFLOP" color="text-yellow-400" minH="180px"
-            potBb={form.preflopPotBb} onPotChange={v=>set('preflopPotBb',v)}
-            action={form.preflopAction} onAction={v=>set('preflopAction',v)}
+          {/* PREFLOP */}
+          <HRStreetRow label="PREFLOP" color="text-yellow-400" pot={preflopPot} minH="250px"
             memo={form.preflopMemo} onMemo={v=>set('preflopMemo',v)}
-            leftContent={<div className="space-y-2">
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500 text-xs w-10">Hero</span>
-                <select value={form.heroPosition} onChange={e=>set('heroPosition',e.target.value)} className={sel}>
+            leftContent={<>
+              <div className="flex items-center gap-1 mb-1">
+                <span className="text-gray-500 text-xs w-8 flex-shrink-0">Hero</span>
+                <select value={form.heroPosition} onChange={e=>set('heroPosition',e.target.value)} className={`${inp} flex-1`}>
                   {POSITIONS.map(p=><option key={p}>{p}</option>)}
                 </select>
               </div>
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500 text-xs w-10">Vil.</span>
-                <select value={form.villainPosition} onChange={e=>set('villainPosition',e.target.value)} className={sel}>
+              <div className="flex items-center gap-1 mb-2">
+                <span className="text-gray-500 text-xs w-8 flex-shrink-0">Vil.</span>
+                <select value={form.villainPosition} onChange={e=>set('villainPosition',e.target.value)} className={`${inp} flex-1`}>
                   {POSITIONS.map(p=><option key={p}>{p}</option>)}
                 </select>
               </div>
-              <div>
-                <div className="text-gray-600 text-xs mb-1">Hero Hand</div>
+              <div className="mb-1">
+                <div className="text-green-600 text-xs mb-0.5">Hero Hand</div>
                 <div className="flex gap-1">{[0,1].map(i=><CardPicker key={i} value={form.heroHand[i]} onChange={c=>setCard('heroHand',i,c)}/>)}</div>
               </div>
               <div>
-                <div className="text-gray-600 text-xs mb-1">Villain Hand</div>
+                <div className="text-red-600 text-xs mb-0.5">Villain Hand</div>
                 <div className="flex gap-1">{[0,1].map(i=><CardPicker key={i} value={form.villainHand[i]} onChange={c=>setCard('villainHand',i,c)}/>)}</div>
               </div>
-            </div>}
+            </>}
+            actionContent={<HRActionRows street="preflop" players={POSITIONS} actsObj={form.preflopActs} heroPos={form.heroPosition} vilPos={form.villainPosition} onSetAct={setAct}/>}
           />
-          {/* Flop */}
-          <StreetRow label="FLOP" color="text-blue-400" minH="130px"
-            potBb={form.flopPotBb} onPotChange={v=>set('flopPotBb',v)}
-            action={form.flopAction} onAction={v=>set('flopAction',v)}
+          {/* FLOP */}
+          <HRStreetRow label="FLOP" color="text-blue-400" pot={flopPot} minH="110px"
             memo={form.flopMemo} onMemo={v=>set('flopMemo',v)}
             leftContent={<div className="flex gap-1 flex-wrap">{[0,1,2].map(i=><CardPicker key={i} value={form.flopBoard[i]} onChange={c=>setCard('flopBoard',i,c)}/>)}</div>}
+            actionContent={flopActive.length>0
+              ?<HRActionRows street="flop" players={flopActive} actsObj={form.flopActs} heroPos={form.heroPosition} vilPos={form.villainPosition} onSetAct={setAct}/>
+              :<div className="text-gray-700 text-xs p-2">アクティブなし</div>}
           />
-          {/* Turn */}
-          <StreetRow label="TURN" color="text-orange-400" minH="100px"
-            potBb={form.turnPotBb} onPotChange={v=>set('turnPotBb',v)}
-            action={form.turnAction} onAction={v=>set('turnAction',v)}
+          {/* TURN */}
+          <HRStreetRow label="TURN" color="text-orange-400" pot={turnPot} minH="80px"
             memo={form.turnMemo} onMemo={v=>set('turnMemo',v)}
             leftContent={<CardPicker value={form.turnCard} onChange={c=>set('turnCard',c)}/>}
+            actionContent={turnActive.length>0
+              ?<HRActionRows street="turn" players={turnActive} actsObj={form.turnActs} heroPos={form.heroPosition} vilPos={form.villainPosition} onSetAct={setAct}/>
+              :<div className="text-gray-700 text-xs p-2">アクティブなし</div>}
           />
-          {/* River */}
-          <StreetRow label="RIVER" color="text-red-400" minH="100px"
-            potBb={form.riverPotBb} onPotChange={v=>set('riverPotBb',v)}
-            action={form.riverAction} onAction={v=>set('riverAction',v)}
+          {/* RIVER */}
+          <HRStreetRow label="RIVER" color="text-red-400" pot={riverPot} minH="80px"
             memo={form.riverMemo} onMemo={v=>set('riverMemo',v)}
             leftContent={<CardPicker value={form.riverCard} onChange={c=>set('riverCard',c)}/>}
+            actionContent={riverActive.length>0
+              ?<HRActionRows street="river" players={riverActive} actsObj={form.riverActs} heroPos={form.heroPosition} vilPos={form.villainPosition} onSetAct={setAct}/>
+              :<div className="text-gray-700 text-xs p-2">アクティブなし</div>}
           />
           {/* Notes */}
           <div className="px-5 py-3 border-t border-gray-700">
