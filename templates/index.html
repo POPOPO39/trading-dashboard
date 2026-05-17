@@ -2421,76 +2421,147 @@
       );
     };
 
-    const CardRow = ({ card, onEdit, onDelete }) => {
+    // カードグリッドの1タイル
+    const CardGridItem = ({ card, onClick }) => {
+      const sold = card.salePrice != null;
+      const proxyUrl = card.imageUrl ? `/api/image-proxy?url=${encodeURIComponent(card.imageUrl)}` : null;
+      return (
+        <div onClick={onClick} className="relative cursor-pointer group rounded-xl overflow-hidden bg-gray-800 shadow-lg hover:shadow-indigo-900/40 hover:scale-105 transition-transform duration-150"
+          style={{aspectRatio:'63/88'}}>
+          {/* Card image */}
+          {proxyUrl
+            ? <img src={proxyUrl} alt={card.name} className="w-full h-full object-cover"
+                onError={e=>{ e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
+            : null}
+          {/* Fallback when no image or load error */}
+          <div className="w-full h-full flex flex-col items-center justify-center text-gray-600"
+            style={proxyUrl ? {display:'none'} : {}}>
+            <span className="text-4xl">🃏</span>
+            <span className="text-xs mt-2 px-2 text-center leading-tight text-gray-500">{card.name}</span>
+          </div>
+          {/* Sold overlay */}
+          {sold && (
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+              <span className="bg-emerald-500 text-white text-xs font-bold px-2 py-1 rounded-full rotate-[-20deg] shadow">売却済</span>
+            </div>
+          )}
+          {/* Quantity badge */}
+          {card.quantity > 1 && (
+            <div className="absolute top-1.5 left-1.5 bg-gray-900/80 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow">
+              {card.quantity}
+            </div>
+          )}
+          {/* Condition badge */}
+          <div className={`absolute top-1.5 right-1.5 text-xs font-bold px-1.5 py-0.5 rounded shadow ${conditionColor(card.condition)}`}>
+            {card.condition}
+          </div>
+          {/* Name on hover */}
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-2 pt-4 pb-2
+            opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            <p className="text-white text-xs font-semibold leading-tight truncate">{card.name}</p>
+            {card.cardCode && <p className="text-indigo-300 text-xs font-mono truncate">{card.cardCode}</p>}
+          </div>
+        </div>
+      );
+    };
+
+    // 詳細ポップアップモーダル
+    const CardDetailModal = ({ card, onClose, onEdit, onDelete }) => {
       const invest = (card.purchasePrice || 0) * (card.quantity || 1);
       const sold   = card.salePrice != null;
       const roi    = sold ? card.salePrice - invest : null;
+      const roiPct = invest > 0 && roi != null ? (roi / invest * 100) : null;
+      const proxyUrl = card.imageUrl ? `/api/image-proxy?url=${encodeURIComponent(card.imageUrl)}` : null;
 
       return (
-        <div className="bg-gray-800 hover:bg-gray-750 rounded-xl p-4 flex gap-4 items-start transition-colors">
-          {/* Image */}
-          <div className="flex-shrink-0 w-16 h-20 rounded-lg overflow-hidden bg-gray-700 flex items-center justify-center">
-            {card.imageUrl
-              ? <img src={`/api/image-proxy?url=${encodeURIComponent(card.imageUrl)}`} alt={card.name}
-                  className="w-full h-full object-cover"
-                  onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='flex';}} />
-              : null}
-            <span className="text-2xl" style={card.imageUrl?{display:'none'}:{}}>🃏</span>
-          </div>
-          {/* Info */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-2 flex-wrap">
-              <div>
-                <span className="text-white font-semibold text-sm leading-tight block">{card.name}</span>
-                <div className="flex items-center gap-2 mt-0.5">
-                  {card.cardCode && <span className="text-indigo-400 text-xs font-mono">{card.cardCode}</span>}
-                  <span className="text-gray-500 text-xs">{fmtDate(card.date)}</span>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden fade-in"
+            onClick={e=>e.stopPropagation()}>
+            {/* Close */}
+            <button onClick={onClose} className="absolute top-3 right-3 z-10 text-gray-400 hover:text-white bg-gray-800 rounded-full w-8 h-8 flex items-center justify-center text-lg leading-none">×</button>
+            <div className="flex gap-0">
+              {/* Image panel */}
+              <div className="w-40 flex-shrink-0 bg-gray-800 flex items-center justify-center min-h-[224px]">
+                {proxyUrl
+                  ? <img src={proxyUrl} alt={card.name} className="w-full h-full object-cover"
+                      onError={e=>{ e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
+                  : null}
+                <span className="text-5xl" style={proxyUrl?{display:'none'}:{}}>🃏</span>
+              </div>
+              {/* Detail panel */}
+              <div className="flex-1 p-5 space-y-4 min-w-0">
+                <div>
+                  <h2 className="text-white font-bold text-base leading-snug">{card.name}</h2>
+                  {card.cardCode && <p className="text-indigo-400 text-sm font-mono mt-0.5">{card.cardCode}</p>}
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${conditionColor(card.condition)}`}>{card.condition}</span>
+                    <span className="text-gray-500 text-xs">{fmtDate(card.date)}</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">枚数</span>
+                    <span className="text-white font-medium">{card.quantity}枚</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">購入金額/枚</span>
+                    <span className="text-white font-medium">{fmtJpy(card.purchasePrice)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm border-t border-gray-700 pt-2">
+                    <span className="text-gray-400">投資額合計</span>
+                    <span className="text-yellow-300 font-bold">{fmtJpy(invest)}</span>
+                  </div>
+                  {sold ? (<>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-400">売却額</span>
+                      <span className="text-emerald-400 font-bold">{fmtJpy(card.salePrice)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm border-t border-gray-700 pt-2">
+                      <span className="text-gray-400">実現ROI</span>
+                      <span className={`font-bold ${roi>=0?'text-emerald-400':'text-red-400'}`}>
+                        {roi>=0?'+':''}{fmtJpy(roi)}
+                        {roiPct!=null && <span className="text-xs ml-1 opacity-75">({roiPct>=0?'+':''}{roiPct.toFixed(1)}%)</span>}
+                      </span>
+                    </div>
+                  </>) : (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-400">状態</span>
+                      <span className="text-sky-400 font-medium">保有中</span>
+                    </div>
+                  )}
+                </div>
+                {card.notes && (
+                  <p className="text-gray-400 text-xs bg-gray-800 rounded-lg px-3 py-2 leading-relaxed">{card.notes}</p>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <button onClick={onEdit}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-sm font-semibold">編集</button>
+                  <button onClick={onDelete}
+                    className="bg-gray-800 hover:bg-red-900 text-gray-400 hover:text-red-300 rounded-lg px-4 py-2 text-sm">削除</button>
                 </div>
               </div>
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${conditionColor(card.condition)}`}>{card.condition}</span>
             </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs">
-              <span className="text-gray-400">枚数: <span className="text-white font-medium">{card.quantity}</span></span>
-              <span className="text-gray-400">購入/枚: <span className="text-white font-medium">{fmtJpy(card.purchasePrice)}</span></span>
-              <span className="text-gray-400">投資額: <span className="text-yellow-300 font-medium">{fmtJpy(invest)}</span></span>
-              {sold
-                ? <span className="text-gray-400">売却額: <span className="text-emerald-400 font-medium">{fmtJpy(card.salePrice)}</span></span>
-                : <span className="text-sky-400">保有中</span>}
-              {roi != null && (
-                <span className="text-gray-400">ROI:
-                  <span className={`font-bold ml-1 ${roi>=0?'text-emerald-400':'text-red-400'}`}>
-                    {roi >= 0 ? '+' : ''}{fmtJpy(roi)}
-                    {invest > 0 && <span className="text-xs ml-1">({(roi/invest*100).toFixed(1)}%)</span>}
-                  </span>
-                </span>
-              )}
-            </div>
-            {card.notes && <p className="text-gray-500 text-xs mt-1 truncate">{card.notes}</p>}
-          </div>
-          {/* Actions */}
-          <div className="flex flex-col gap-1 flex-shrink-0">
-            <button onClick={()=>onEdit(card)} className="text-gray-500 hover:text-indigo-400 text-xs px-2 py-1">編集</button>
-            <button onClick={()=>{ if(confirm(`「${card.name}」を削除しますか？`)) onDelete(card.id); }}
-              className="text-gray-500 hover:text-red-400 text-xs px-2 py-1">削除</button>
           </div>
         </div>
       );
     };
 
     const TorekaPage = ({ cards, onAdd, onUpdate, onDelete }) => {
-      const [showForm, setShowForm] = useState(false);
-      const [editing,  setEditing]  = useState(null);
-      const [search,   setSearch]   = useState('');
-      const [condFilter, setCondFilter] = useState('all');
+      const [showForm,  setShowForm]  = useState(false);
+      const [editing,   setEditing]   = useState(null);
+      const [selected,  setSelected]  = useState(null);  // 詳細モーダル用
+      const [search,    setSearch]    = useState('');
+      const [condFilter,setCondFilter]= useState('all');
 
       // Summary stats
       const stats = useMemo(() => {
-        const invest   = cards.reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
-        const soldCards = cards.filter(c => c.salePrice != null);
-        const sales    = soldCards.reduce((s,c) => s + (c.salePrice||0), 0);
+        const invest     = cards.reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
+        const soldCards  = cards.filter(c => c.salePrice != null);
+        const sales      = soldCards.reduce((s,c) => s + (c.salePrice||0), 0);
         const soldInvest = soldCards.reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
-        const roi      = sales - soldInvest;
-        const holding  = cards.filter(c => c.salePrice == null).reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
+        const roi        = sales - soldInvest;
+        const holding    = cards.filter(c => c.salePrice == null).reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
         return { invest, sales, roi, holding, soldCount: soldCards.length, totalCount: cards.length };
       }, [cards]);
 
@@ -2505,20 +2576,25 @@
       }, [cards, search, condFilter]);
 
       const handleSave = async (data) => {
-        if (editing) { await onUpdate(data); setEditing(null); }
+        if (editing) { await onUpdate(data); setEditing(null); setShowForm(false); }
         else         { await onAdd(data);    setShowForm(false); }
       };
-      const handleEdit = (card) => { setEditing(card); setShowForm(false); };
+      const openEdit = (card) => { setSelected(null); setEditing(card); setShowForm(true); };
+      const handleDelete = async (card) => {
+        if (!confirm(`「${card.name}」を削除しますか？`)) return;
+        setSelected(null);
+        await onDelete(card.id);
+      };
 
       return (
         <div className="space-y-6">
           {/* Summary */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label:'総投資額',     value: fmtJpy(stats.invest),   sub:`${stats.totalCount}枚`,            color:'text-yellow-300' },
-              { label:'保有資産額',   value: fmtJpy(stats.holding),  sub:'未売却分のみ',                       color:'text-sky-300' },
-              { label:'売却額合計',   value: fmtJpy(stats.sales),    sub:`${stats.soldCount}枚売却済`,         color:'text-emerald-300' },
-              { label:'実現ROI',      value: fmtJpy(stats.roi),      sub: stats.invest>0 ? `売却分のみ` : '—', color: stats.roi >= 0 ? 'text-emerald-400' : 'text-red-400' },
+              { label:'総投資額',   value: fmtJpy(stats.invest),   sub:`${stats.totalCount}種`,             color:'text-yellow-300' },
+              { label:'保有資産額', value: fmtJpy(stats.holding),  sub:'未売却分のみ',                        color:'text-sky-300' },
+              { label:'売却額合計', value: fmtJpy(stats.sales),    sub:`${stats.soldCount}種売却済`,          color:'text-emerald-300' },
+              { label:'実現ROI',    value: fmtJpy(stats.roi),      sub:'売却分のみ',                          color: stats.roi >= 0 ? 'text-emerald-400' : 'text-red-400' },
             ].map(({label,value,sub,color})=>(
               <div key={label} className="bg-gray-800 rounded-xl p-4">
                 <div className="text-gray-400 text-xs mb-1">{label}</div>
@@ -2532,39 +2608,46 @@
           <div className="flex flex-wrap items-center gap-3">
             <input value={search} onChange={e=>setSearch(e.target.value)}
               className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-indigo-500 focus:outline-none w-48"
-              placeholder="🔍 カード名検索…" />
+              placeholder="🔍 カード名・ID検索…" />
             <select value={condFilter} onChange={e=>setCondFilter(e.target.value)}
               className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-indigo-500 focus:outline-none">
               <option value="all">すべての状態</option>
               {CARD_CONDITIONS.map(c=><option key={c} value={c}>{c}</option>)}
             </select>
             <div className="flex-1"/>
-            {!showForm && !editing && (
-              <button onClick={()=>setShowForm(true)}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold">
-                ＋ カード登録
-              </button>
-            )}
+            <button onClick={()=>{ setEditing(null); setShowForm(v=>!v); }}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+              {showForm && !editing ? '✕ 閉じる' : '＋ カード登録'}
+            </button>
           </div>
 
-          {/* Add form */}
+          {/* Add / Edit form */}
           {showForm && (
-            <CardForm onSave={handleSave} onCancel={()=>setShowForm(false)} />
+            <CardForm card={editing} onSave={handleSave} onCancel={()=>{ setShowForm(false); setEditing(null); }} />
           )}
 
-          {/* Card list */}
-          {filtered.length === 0 && !showForm && !editing && (
-            <div className="text-center py-16 text-gray-600">
-              <div className="text-4xl mb-3">🃏</div>
+          {/* Card grid */}
+          {filtered.length === 0 && !showForm && (
+            <div className="text-center py-20 text-gray-600">
+              <div className="text-5xl mb-3">🃏</div>
               <p className="text-sm">{cards.length === 0 ? 'カードを登録してください' : '条件に一致するカードがありません'}</p>
             </div>
           )}
-          <div className="space-y-3">
-            {filtered.map(c => editing?.id === c.id
-              ? <CardForm key={c.id} card={editing} onSave={handleSave} onCancel={()=>setEditing(null)} />
-              : <CardRow  key={c.id} card={c} onEdit={handleEdit} onDelete={onDelete} />
-            )}
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-9 gap-3">
+            {filtered.map(c => (
+              <CardGridItem key={c.id} card={c} onClick={()=>setSelected(c)} />
+            ))}
           </div>
+
+          {/* Detail modal */}
+          {selected && (
+            <CardDetailModal
+              card={selected}
+              onClose={()=>setSelected(null)}
+              onEdit={()=>openEdit(selected)}
+              onDelete={()=>handleDelete(selected)}
+            />
+          )}
         </div>
       );
     };
