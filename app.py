@@ -1,7 +1,8 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, Response
 from supabase import create_client, Client
 from dotenv import load_dotenv
-import os, json
+import os, json, requests as req_lib
+from urllib.parse import urlparse
 
 load_dotenv()  # .env ファイルを自動読み込み
 
@@ -400,6 +401,31 @@ def delete_hand_review(hand_id):
     except Exception as e:
         print(f'delete_hand_review error: {e}')
         return jsonify({'error': str(e)}), 500
+
+# --- Image Proxy ---
+
+@app.route('/api/image-proxy')
+def image_proxy():
+    url = request.args.get('url', '').strip()
+    if not url:
+        return jsonify({'error': 'no url'}), 400
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            return jsonify({'error': 'invalid url'}), 400
+        # Use the image's own origin as Referer to bypass hotlink protection
+        referer = f"{parsed.scheme}://{parsed.netloc}/"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Referer':    referer,
+            'Accept':     'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        }
+        r = req_lib.get(url, headers=headers, timeout=10, stream=True)
+        content_type = r.headers.get('Content-Type', 'image/jpeg')
+        return Response(r.content, content_type=content_type)
+    except Exception as e:
+        print(f'image_proxy error: {e}')
+        return jsonify({'error': str(e)}), 502
 
 # --- Trading Cards API ---
 

@@ -2431,7 +2431,9 @@
           {/* Image */}
           <div className="flex-shrink-0 w-16 h-20 rounded-lg overflow-hidden bg-gray-700 flex items-center justify-center">
             {card.imageUrl
-              ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='flex';}} />
+              ? <img src={`/api/image-proxy?url=${encodeURIComponent(card.imageUrl)}`} alt={card.name}
+                  className="w-full h-full object-cover"
+                  onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='flex';}} />
               : null}
             <span className="text-2xl" style={card.imageUrl?{display:'none'}:{}}>🃏</span>
           </div>
