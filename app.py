@@ -407,6 +407,7 @@ def row_to_card(row):
     return {
         'id':            row['id'],
         'name':          row.get('name', ''),
+        'cardCode':      row.get('card_code', '') or '',
         'imageUrl':      row.get('image_url', '') or '',
         'condition':     row.get('condition', 'A'),
         'quantity':      row.get('quantity', 1),
@@ -438,6 +439,7 @@ def add_card():
         row = {
             'id':             data['id'],
             'name':           data.get('name', ''),
+            'card_code':      data.get('cardCode', ''),
             'image_url':      data.get('imageUrl', ''),
             'condition':      data.get('condition', 'A'),
             'quantity':       int(data.get('quantity', 1)),
@@ -458,6 +460,7 @@ def update_card(card_id):
         data = request.json
         row = {
             'name':           data.get('name', ''),
+            'card_code':      data.get('cardCode', ''),
             'image_url':      data.get('imageUrl', ''),
             'condition':      data.get('condition', 'A'),
             'quantity':       int(data.get('quantity', 1)),
