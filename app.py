@@ -425,7 +425,10 @@ def image_proxy():
         }
         r = req_lib.get(url, headers=headers, timeout=10, stream=True)
         content_type = r.headers.get('Content-Type', 'image/jpeg')
-        return Response(r.content, content_type=content_type)
+        resp = Response(r.content, content_type=content_type)
+        # 7日間ブラウザキャッシュ（カード画像は変わらないため）
+        resp.headers['Cache-Control'] = 'public, max-age=604800, immutable'
+        return resp
     except Exception as e:
         print(f'image_proxy error: {e}')
         return jsonify({'error': str(e)}), 502

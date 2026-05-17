@@ -2434,7 +2434,7 @@
         <div onClick={onClick} className="relative cursor-pointer group rounded-xl overflow-hidden bg-gray-800 shadow-lg hover:shadow-indigo-900/40 hover:scale-105 transition-transform duration-150"
           style={{aspectRatio:'63/88'}}>
           {proxyUrl
-            ? <img src={proxyUrl} alt={group.name} className="w-full h-full object-cover"
+            ? <img src={proxyUrl} alt={group.name} className="w-full h-full object-cover" loading="lazy"
                 onError={e=>{ e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
             : null}
           <div className="w-full h-full flex flex-col items-center justify-center"
