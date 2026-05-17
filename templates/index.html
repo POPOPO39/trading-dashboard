@@ -2421,7 +2421,7 @@
       );
     };
 
-    // カードグリッドの1タイル
+    // カードグリッドの1タイル（数字バッジのみ、状態バッジなし）
     const CardGridItem = ({ card, onClick }) => {
       const sold = card.salePrice != null;
       const proxyUrl = card.imageUrl ? `/api/image-proxy?url=${encodeURIComponent(card.imageUrl)}` : null;
@@ -2433,8 +2433,8 @@
             ? <img src={proxyUrl} alt={card.name} className="w-full h-full object-cover"
                 onError={e=>{ e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
             : null}
-          {/* Fallback when no image or load error */}
-          <div className="w-full h-full flex flex-col items-center justify-center text-gray-600"
+          {/* Fallback */}
+          <div className="w-full h-full flex flex-col items-center justify-center"
             style={proxyUrl ? {display:'none'} : {}}>
             <span className="text-4xl">🃏</span>
             <span className="text-xs mt-2 px-2 text-center leading-tight text-gray-500">{card.name}</span>
@@ -2445,15 +2445,9 @@
               <span className="bg-emerald-500 text-white text-xs font-bold px-2 py-1 rounded-full rotate-[-20deg] shadow">売却済</span>
             </div>
           )}
-          {/* Quantity badge */}
-          {card.quantity > 1 && (
-            <div className="absolute top-1.5 left-1.5 bg-gray-900/80 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow">
-              {card.quantity}
-            </div>
-          )}
-          {/* Condition badge */}
-          <div className={`absolute top-1.5 right-1.5 text-xs font-bold px-1.5 py-0.5 rounded shadow ${conditionColor(card.condition)}`}>
-            {card.condition}
+          {/* Quantity badge (always show) */}
+          <div className="absolute top-1.5 left-1.5 bg-gray-900/85 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow">
+            {card.quantity}
           </div>
           {/* Name on hover */}
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-2 pt-4 pb-2
@@ -2465,8 +2459,77 @@
       );
     };
 
+    // 同カードの追加登録フォーム（状態・枚数・金額のみ）
+    const CardAddSameForm = ({ sourceCard, onSave, onCancel }) => {
+      const [form, setForm] = useState({
+        condition: 'A', quantity: 1, purchasePrice: '', salePrice: '', date: todayStr(), notes: '',
+      });
+      const set = (k,v) => setForm(f=>({...f,[k]:v}));
+      const handleSave = () => {
+        onSave({
+          id:            uid(),
+          name:          sourceCard.name,
+          cardCode:      sourceCard.cardCode,
+          imageUrl:      sourceCard.imageUrl,
+          condition:     form.condition,
+          quantity:      parseInt(form.quantity) || 1,
+          purchasePrice: parseFloat(form.purchasePrice) || 0,
+          salePrice:     form.salePrice !== '' ? parseFloat(form.salePrice) : null,
+          date:          form.date,
+          notes:         form.notes,
+        });
+      };
+      return (
+        <div className="border-t border-gray-700 pt-4 mt-2 space-y-3">
+          <p className="text-gray-400 text-xs font-semibold">追加登録（同カード・別枚）</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">状態</label>
+              <select value={form.condition} onChange={e=>set('condition',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-2 py-1.5 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none">
+                {CARD_CONDITIONS.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">枚数</label>
+              <input type="number" min="1" value={form.quantity} onChange={e=>set('quantity',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-2 py-1.5 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">購入金額/枚 (¥)</label>
+              <input type="number" min="0" value={form.purchasePrice} onChange={e=>set('purchasePrice',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-2 py-1.5 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none"
+                placeholder="0" />
+            </div>
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">売却額合計 (¥)</label>
+              <input type="number" min="0" value={form.salePrice} onChange={e=>set('salePrice',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-2 py-1.5 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none"
+                placeholder="未売却" />
+            </div>
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">購入日</label>
+              <input type="date" value={form.date} onChange={e=>set('date',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-2 py-1.5 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="text-gray-500 text-xs block mb-1">メモ</label>
+              <input value={form.notes} onChange={e=>set('notes',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-2 py-1.5 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none"
+                placeholder="任意" />
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={onCancel} className="text-gray-400 hover:text-white text-sm px-3 py-1.5">キャンセル</button>
+            <button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-lg text-sm font-semibold">追加登録</button>
+          </div>
+        </div>
+      );
+    };
+
     // 詳細ポップアップモーダル
-    const CardDetailModal = ({ card, onClose, onEdit, onDelete }) => {
+    const CardDetailModal = ({ card, onClose, onEdit, onDelete, onAddSame }) => {
+      const [addingMore, setAddingMore] = useState(false);
       const invest = (card.purchasePrice || 0) * (card.quantity || 1);
       const sold   = card.salePrice != null;
       const roi    = sold ? card.salePrice - invest : null;
@@ -2482,7 +2545,7 @@
             <button onClick={onClose} className="absolute top-3 right-3 z-10 text-gray-400 hover:text-white bg-gray-800 rounded-full w-8 h-8 flex items-center justify-center text-lg leading-none">×</button>
             <div className="flex gap-0">
               {/* Image panel */}
-              <div className="w-40 flex-shrink-0 bg-gray-800 flex items-center justify-center min-h-[224px]">
+              <div className="w-40 flex-shrink-0 bg-gray-800 flex items-center justify-center" style={{minHeight:'240px'}}>
                 {proxyUrl
                   ? <img src={proxyUrl} alt={card.name} className="w-full h-full object-cover"
                       onError={e=>{ e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
@@ -2490,16 +2553,16 @@
                 <span className="text-5xl" style={proxyUrl?{display:'none'}:{}}>🃏</span>
               </div>
               {/* Detail panel */}
-              <div className="flex-1 p-5 space-y-4 min-w-0">
+              <div className="flex-1 p-5 min-w-0 overflow-y-auto" style={{maxHeight:'80vh'}}>
                 <div>
-                  <h2 className="text-white font-bold text-base leading-snug">{card.name}</h2>
+                  <h2 className="text-white font-bold text-base leading-snug pr-6">{card.name}</h2>
                   {card.cardCode && <p className="text-indigo-400 text-sm font-mono mt-0.5">{card.cardCode}</p>}
                   <div className="flex items-center gap-2 mt-1.5">
                     <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${conditionColor(card.condition)}`}>{card.condition}</span>
                     <span className="text-gray-500 text-xs">{fmtDate(card.date)}</span>
                   </div>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 mt-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-400">枚数</span>
                     <span className="text-white font-medium">{card.quantity}枚</span>
@@ -2532,14 +2595,27 @@
                   )}
                 </div>
                 {card.notes && (
-                  <p className="text-gray-400 text-xs bg-gray-800 rounded-lg px-3 py-2 leading-relaxed">{card.notes}</p>
+                  <p className="text-gray-400 text-xs bg-gray-800 rounded-lg px-3 py-2 leading-relaxed mt-3">{card.notes}</p>
                 )}
-                <div className="flex gap-2 pt-1">
+                {/* Action buttons */}
+                <div className="flex gap-2 mt-4">
                   <button onClick={onEdit}
                     className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-sm font-semibold">編集</button>
+                  <button onClick={()=>setAddingMore(v=>!v)}
+                    className={`flex-1 rounded-lg py-2 text-sm font-semibold transition-colors ${addingMore ? 'bg-gray-700 text-gray-300' : 'bg-emerald-700 hover:bg-emerald-600 text-white'}`}>
+                    {addingMore ? '✕ 閉じる' : '＋ 追加登録'}
+                  </button>
                   <button onClick={onDelete}
-                    className="bg-gray-800 hover:bg-red-900 text-gray-400 hover:text-red-300 rounded-lg px-4 py-2 text-sm">削除</button>
+                    className="bg-gray-800 hover:bg-red-900 text-gray-400 hover:text-red-300 rounded-lg px-3 py-2 text-sm">削除</button>
                 </div>
+                {/* Inline add-same form */}
+                {addingMore && (
+                  <CardAddSameForm
+                    sourceCard={card}
+                    onSave={async (data) => { await onAddSame(data); setAddingMore(false); }}
+                    onCancel={() => setAddingMore(false)}
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -2548,11 +2624,12 @@
     };
 
     const TorekaPage = ({ cards, onAdd, onUpdate, onDelete }) => {
-      const [showForm,  setShowForm]  = useState(false);
-      const [editing,   setEditing]   = useState(null);
-      const [selected,  setSelected]  = useState(null);  // 詳細モーダル用
-      const [search,    setSearch]    = useState('');
-      const [condFilter,setCondFilter]= useState('all');
+      const [showForm,   setShowForm]   = useState(false);
+      const [editing,    setEditing]    = useState(null);
+      const [selected,   setSelected]   = useState(null);
+      const [search,     setSearch]     = useState('');
+      const [condFilter, setCondFilter] = useState('all');
+      const [luffyOnly,  setLuffyOnly]  = useState(false);   // デフォルトOFF
 
       // Summary stats
       const stats = useMemo(() => {
@@ -2567,13 +2644,14 @@
 
       const filtered = useMemo(() => {
         let cs = [...cards];
+        if (luffyOnly)    cs = cs.filter(c => c.name.includes('ルフィ') || c.name.toLowerCase().includes('luffy'));
         if (search.trim()) {
           const q = search.trim().toLowerCase();
           cs = cs.filter(c => c.name.toLowerCase().includes(q) || (c.cardCode||'').toLowerCase().includes(q) || (c.notes||'').toLowerCase().includes(q));
         }
         if (condFilter !== 'all') cs = cs.filter(c => c.condition === condFilter);
         return cs;
-      }, [cards, search, condFilter]);
+      }, [cards, search, condFilter, luffyOnly]);
 
       const handleSave = async (data) => {
         if (editing) { await onUpdate(data); setEditing(null); setShowForm(false); }
@@ -2585,16 +2663,20 @@
         setSelected(null);
         await onDelete(card.id);
       };
+      const handleAddSame = async (data) => {
+        await onAdd(data);
+        // モーダルは開いたまま（同カードをさらに追加できるように）
+      };
 
       return (
         <div className="space-y-6">
           {/* Summary */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label:'総投資額',   value: fmtJpy(stats.invest),   sub:`${stats.totalCount}種`,             color:'text-yellow-300' },
-              { label:'保有資産額', value: fmtJpy(stats.holding),  sub:'未売却分のみ',                        color:'text-sky-300' },
-              { label:'売却額合計', value: fmtJpy(stats.sales),    sub:`${stats.soldCount}種売却済`,          color:'text-emerald-300' },
-              { label:'実現ROI',    value: fmtJpy(stats.roi),      sub:'売却分のみ',                          color: stats.roi >= 0 ? 'text-emerald-400' : 'text-red-400' },
+              { label:'総投資額',   value: fmtJpy(stats.invest),  sub:`${stats.totalCount}種`,       color:'text-yellow-300' },
+              { label:'保有資産額', value: fmtJpy(stats.holding), sub:'未売却分のみ',                  color:'text-sky-300' },
+              { label:'売却額合計', value: fmtJpy(stats.sales),   sub:`${stats.soldCount}種売却済`,   color:'text-emerald-300' },
+              { label:'実現ROI',    value: fmtJpy(stats.roi),     sub:'売却分のみ',                    color: stats.roi >= 0 ? 'text-emerald-400' : 'text-red-400' },
             ].map(({label,value,sub,color})=>(
               <div key={label} className="bg-gray-800 rounded-xl p-4">
                 <div className="text-gray-400 text-xs mb-1">{label}</div>
@@ -2605,15 +2687,20 @@
           </div>
 
           {/* Controls */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <input value={search} onChange={e=>setSearch(e.target.value)}
-              className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-indigo-500 focus:outline-none w-48"
+              className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-indigo-500 focus:outline-none w-44"
               placeholder="🔍 カード名・ID検索…" />
             <select value={condFilter} onChange={e=>setCondFilter(e.target.value)}
               className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-indigo-500 focus:outline-none">
               <option value="all">すべての状態</option>
               {CARD_CONDITIONS.map(c=><option key={c} value={c}>{c}</option>)}
             </select>
+            {/* ルフィフィルター */}
+            <button onClick={()=>setLuffyOnly(v=>!v)}
+              className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${luffyOnly ? 'bg-red-700 border-red-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'}`}>
+              🏴‍☠️ ルフィ
+            </button>
             <div className="flex-1"/>
             <button onClick={()=>{ setEditing(null); setShowForm(v=>!v); }}
               className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold">
@@ -2646,6 +2733,7 @@
               onClose={()=>setSelected(null)}
               onEdit={()=>openEdit(selected)}
               onDelete={()=>handleDelete(selected)}
+              onAddSame={handleAddSame}
             />
           )}
         </div>
