@@ -44,6 +44,7 @@
       minRR:              2.0,
       minComplianceRate:  90,
       maxRiskPerTradePct: 2,
+      torekaTotal:        0,
     };
 
     const parseResp = async (r) => {
@@ -2670,25 +2671,28 @@
       );
     };
 
-    const TorekaPage = ({ cards, onAdd, onUpdate, onDelete }) => {
+    const TorekaPage = ({ cards, onAdd, onUpdate, onDelete, torekaTotal, onSaveTorekaTotal }) => {
       const [showForm,    setShowForm]    = useState(false);
       const [editing,     setEditing]     = useState(null);
       const [selectedKey, setSelectedKey] = useState(null);
       const [search,      setSearch]      = useState('');
       const [condFilter,  setCondFilter]  = useState('all');
-      const [luffyOnly,   setLuffyOnly]   = useState(false);
+      const [luffyOnly,    setLuffyOnly]    = useState(false);
+      const [editingTotal, setEditingTotal] = useState(false);
+      const [totalInput,   setTotalInput]   = useState('');
+
+      const openEditTotal = () => { setTotalInput(torekaTotal > 0 ? String(torekaTotal) : ''); setEditingTotal(true); };
+      const saveTotal     = async () => { await onSaveTorekaTotal(parseFloat(totalInput) || 0); setEditingTotal(false); };
 
       // Summary stats（全カード対象）
       const stats = useMemo(() => {
-        const invest     = cards.reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
-        const soldCards  = cards.filter(c => c.salePrice != null);
-        const sales      = soldCards.reduce((s,c) => s + (c.salePrice||0), 0);
-        const soldInvest = soldCards.reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
-        const roi        = sales - soldInvest;
-        const holding    = cards.filter(c => c.salePrice == null).reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
-        const uniqueCards = new Set(cards.map(groupKey)).size;
-        return { invest, sales, roi, holding, soldCount: soldCards.length, uniqueCards };
-      }, [cards]);
+        const singleInvest = cards.reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
+        const soldCards    = cards.filter(c => c.salePrice != null);
+        const sales        = soldCards.reduce((s,c) => s + (c.salePrice||0), 0);
+        const roi          = sales - torekaTotal;           // トータル投資額ベースROI
+        const uniqueCards  = new Set(cards.map(groupKey)).size;
+        return { singleInvest, sales, roi, soldCount: soldCards.length, uniqueCards };
+      }, [cards, torekaTotal]);
 
       // フィルター後のカード一覧
       const filtered = useMemo(() => {
@@ -2734,18 +2738,52 @@
         <div className="space-y-6">
           {/* Summary */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label:'総投資額',   value: fmtJpy(stats.invest),  sub:`${stats.uniqueCards}種`,        color:'text-yellow-300' },
-              { label:'保有資産額', value: fmtJpy(stats.holding), sub:'未売却分のみ',                   color:'text-sky-300' },
-              { label:'売却額合計', value: fmtJpy(stats.sales),   sub:`${stats.soldCount}件売却済`,    color:'text-emerald-300' },
-              { label:'実現ROI',    value: fmtJpy(stats.roi),     sub:'売却分のみ',                     color: stats.roi >= 0 ? 'text-emerald-400' : 'text-red-400' },
-            ].map(({label,value,sub,color})=>(
-              <div key={label} className="bg-gray-800 rounded-xl p-4">
-                <div className="text-gray-400 text-xs mb-1">{label}</div>
-                <div className={`font-bold text-lg font-mono ${color}`}>{value}</div>
-                <div className="text-gray-500 text-xs mt-0.5">{sub}</div>
+            {/* トータル投資額（手動入力） */}
+            <div className="bg-gray-800 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-gray-400 text-xs">トータル投資額</span>
+                <button onClick={openEditTotal} className="text-gray-600 hover:text-indigo-400 text-xs">✏️</button>
               </div>
-            ))}
+              {editingTotal ? (
+                <div className="flex items-center gap-1 mt-1">
+                  <span className="text-gray-400 text-sm">¥</span>
+                  <input type="number" min="0" value={totalInput} onChange={e=>setTotalInput(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==='Enter') saveTotal(); if(e.key==='Escape') setEditingTotal(false); }}
+                    autoFocus
+                    className="flex-1 bg-gray-700 text-white rounded px-2 py-1 text-sm border border-indigo-500 focus:outline-none w-0" />
+                  <button onClick={saveTotal} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-2 py-1 rounded">✓</button>
+                </div>
+              ) : (
+                <div className="font-bold text-lg font-mono text-orange-300 cursor-pointer" onClick={openEditTotal}>
+                  {torekaTotal > 0 ? fmtJpy(torekaTotal) : <span className="text-gray-600 text-sm">クリックして入力</span>}
+                </div>
+              )}
+              <div className="text-gray-500 text-xs mt-0.5">{stats.uniqueCards}種 パック・経費込み</div>
+            </div>
+            {/* メインシングル投資額 */}
+            <div className="bg-gray-800 rounded-xl p-4">
+              <div className="text-gray-400 text-xs mb-1">メインシングル投資額</div>
+              <div className="font-bold text-lg font-mono text-yellow-300">{fmtJpy(stats.singleInvest)}</div>
+              <div className="text-gray-500 text-xs mt-0.5">カード購入額の合計</div>
+            </div>
+            {/* 売却額合計 */}
+            <div className="bg-gray-800 rounded-xl p-4">
+              <div className="text-gray-400 text-xs mb-1">売却額合計</div>
+              <div className="font-bold text-lg font-mono text-emerald-300">{fmtJpy(stats.sales)}</div>
+              <div className="text-gray-500 text-xs mt-0.5">{stats.soldCount}件売却済</div>
+            </div>
+            {/* 実現ROI */}
+            <div className="bg-gray-800 rounded-xl p-4">
+              <div className="text-gray-400 text-xs mb-1">実現ROI</div>
+              <div className={`font-bold text-lg font-mono ${stats.roi >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {torekaTotal > 0 ? fmtJpy(stats.roi) : <span className="text-gray-600 text-sm">投資額を入力</span>}
+              </div>
+              <div className="text-gray-500 text-xs mt-0.5">
+                {torekaTotal > 0 && stats.sales > 0
+                  ? `売却額 − トータル投資額`
+                  : '売却額 − トータル投資額'}
+              </div>
+            </div>
           </div>
 
           {/* Controls */}
@@ -3325,7 +3363,9 @@
             {/* Toreka section */}
             {section==='toreka'&&(
               <TorekaPage cards={torekaCards}
-                onAdd={addTorekaCard} onUpdate={updateTorekaCard} onDelete={deleteTorekaCard}/>
+                onAdd={addTorekaCard} onUpdate={updateTorekaCard} onDelete={deleteTorekaCard}
+                torekaTotal={settings.torekaTotal||0}
+                onSaveTorekaTotal={async(v)=>{ await saveSettings({...settings, torekaTotal:v}); }}/>
             )}
             {/* Calendar section */}
             {section==='calendar'&&(

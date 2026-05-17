@@ -21,6 +21,7 @@ DEFAULT_SETTINGS = {
     'minRR': 2.0,
     'minComplianceRate': 90.0,
     'maxRiskPerTradePct': 2.0,
+    'torekaTotal': 0.0,
 }
 
 def row_to_trade(row):
@@ -55,6 +56,7 @@ def row_to_settings(row):
         'minRR': row['min_rr'],
         'minComplianceRate': row['min_compliance_rate'],
         'maxRiskPerTradePct': row['max_risk_per_trade_pct'],
+        'torekaTotal': row.get('toreka_total_investment') or 0.0,
     }
 
 def settings_to_row(data):
@@ -67,6 +69,7 @@ def settings_to_row(data):
         'min_rr': float(data.get('minRR', DEFAULT_SETTINGS['minRR'])),
         'min_compliance_rate': float(data.get('minComplianceRate', DEFAULT_SETTINGS['minComplianceRate'])),
         'max_risk_per_trade_pct': float(data.get('maxRiskPerTradePct', DEFAULT_SETTINGS['maxRiskPerTradePct'])),
+        'toreka_total_investment': float(data.get('torekaTotal', 0.0)),
     }
 
 @app.route('/')
