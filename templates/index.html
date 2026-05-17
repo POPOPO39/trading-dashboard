@@ -2671,30 +2671,253 @@
       );
     };
 
-    const TorekaPage = ({ cards, onAdd, onUpdate, onDelete, torekaTotal, onSaveTorekaTotal }) => {
+    // ── その他売却フォーム ──────────────────────────────────────────────────
+    const OtherSaleForm = ({ sale, onSave, onCancel }) => {
+      const blank = { id: uid(), date: todayStr(), description: '', saleAmount: '', imageUrl: '', notes: '' };
+      const [form, setForm] = useState(sale ? { ...sale, saleAmount: sale.saleAmount ?? '' } : blank);
+      const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+      const handleSave = () => {
+        if (!form.description.trim()) { alert('内容を入力してください'); return; }
+        onSave({ ...form, saleAmount: parseFloat(form.saleAmount) || 0 });
+      };
+      return (
+        <div className="bg-gray-800 rounded-xl p-4 space-y-3 fade-in">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="text-gray-400 text-xs block mb-1">内容 *</label>
+              <input value={form.description} onChange={e => set('description', e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none"
+                placeholder="例: ノーマルまとめ売り、パック余り等" />
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs block mb-1">売却日</label>
+              <input type="date" value={form.date} onChange={e => set('date', e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs block mb-1">売却額 (¥)</label>
+              <input type="number" min="0" value={form.saleAmount} onChange={e => set('saleAmount', e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none"
+                placeholder="0" />
+            </div>
+            <div className="col-span-2">
+              <label className="text-gray-400 text-xs block mb-1">画像URL（任意）</label>
+              <input value={form.imageUrl} onChange={e => set('imageUrl', e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none"
+                placeholder="https://..." />
+            </div>
+            <div className="col-span-2">
+              <label className="text-gray-400 text-xs block mb-1">メモ</label>
+              <input value={form.notes} onChange={e => set('notes', e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none"
+                placeholder="任意" />
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={onCancel} className="text-gray-400 hover:text-white text-sm px-3 py-2">キャンセル</button>
+            <button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-lg text-sm font-semibold">保存</button>
+          </div>
+        </div>
+      );
+    };
+
+    // ── 売却管理タブ ───────────────────────────────────────────────────────
+    const SalesTab = ({ cards, otherSales, onAddOtherSale, onUpdateOtherSale, onDeleteOtherSale, torekaTotal, onSaveTorekaTotal }) => {
+      const [showOtherForm, setShowOtherForm] = useState(false);
+      const [editingOther,  setEditingOther]  = useState(null);
+      const [editingTotal,  setEditingTotal]  = useState(false);
+      const [totalInput,    setTotalInput]    = useState('');
+
+      const openEditTotal = () => { setTotalInput(torekaTotal > 0 ? String(torekaTotal) : ''); setEditingTotal(true); };
+      const saveTotal     = async () => { await onSaveTorekaTotal(parseFloat(totalInput) || 0); setEditingTotal(false); };
+
+      // 売却済みシングル
+      const soldSingles = useMemo(() =>
+        cards.filter(c => c.salePrice != null).sort((a, b) => b.date.localeCompare(a.date))
+      , [cards]);
+
+      const singleSalesTotal = useMemo(() => soldSingles.reduce((s, c) => s + (c.salePrice || 0), 0), [soldSingles]);
+      const otherSalesTotal  = useMemo(() => otherSales.reduce((s, o) => s + (o.saleAmount || 0), 0), [otherSales]);
+      const grandTotal       = singleSalesTotal + otherSalesTotal;
+      const roi              = grandTotal - torekaTotal;
+
+      const handleOtherSave = async (data) => {
+        if (editingOther) { await onUpdateOtherSale(data); setEditingOther(null); }
+        else              { await onAddOtherSale(data);    setShowOtherForm(false); }
+      };
+
+      return (
+        <div className="space-y-6">
+          {/* サマリー */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {/* トータル投資額 */}
+            <div className="bg-gray-800 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-gray-400 text-xs">トータル投資額</span>
+                <button onClick={openEditTotal} className="text-gray-600 hover:text-indigo-400 text-xs">✏️</button>
+              </div>
+              {editingTotal ? (
+                <div className="flex items-center gap-1">
+                  <span className="text-gray-400 text-sm">¥</span>
+                  <input type="number" min="0" value={totalInput} onChange={e => setTotalInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveTotal(); if (e.key === 'Escape') setEditingTotal(false); }}
+                    autoFocus className="flex-1 bg-gray-700 text-white rounded px-2 py-1 text-sm border border-indigo-500 focus:outline-none w-0" />
+                  <button onClick={saveTotal} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-2 py-1 rounded">✓</button>
+                </div>
+              ) : (
+                <div className="font-bold text-lg font-mono text-orange-300 cursor-pointer" onClick={openEditTotal}>
+                  {torekaTotal > 0 ? fmtJpy(torekaTotal) : <span className="text-gray-600 text-sm">クリックして入力</span>}
+                </div>
+              )}
+              <div className="text-gray-500 text-xs mt-0.5">パック・経費込み</div>
+            </div>
+            <div className="bg-gray-800 rounded-xl p-4">
+              <div className="text-gray-400 text-xs mb-1">シングル売却額</div>
+              <div className="font-bold text-lg font-mono text-emerald-300">{fmtJpy(singleSalesTotal)}</div>
+              <div className="text-gray-500 text-xs mt-0.5">{soldSingles.length}件</div>
+            </div>
+            <div className="bg-gray-800 rounded-xl p-4">
+              <div className="text-gray-400 text-xs mb-1">その他売却額</div>
+              <div className="font-bold text-lg font-mono text-emerald-300">{fmtJpy(otherSalesTotal)}</div>
+              <div className="text-gray-500 text-xs mt-0.5">{otherSales.length}件 (ノーマル等)</div>
+            </div>
+            <div className="bg-gray-800 rounded-xl p-4">
+              <div className="text-gray-400 text-xs mb-1">実現ROI</div>
+              <div className={`font-bold text-lg font-mono ${roi >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {torekaTotal > 0 ? fmtJpy(roi) : <span className="text-gray-600 text-sm">投資額を入力</span>}
+              </div>
+              <div className="text-gray-500 text-xs mt-0.5">売却合計 {fmtJpy(grandTotal)}</div>
+            </div>
+          </div>
+
+          {/* シングル売却リスト */}
+          <div>
+            <h3 className="text-gray-300 font-semibold text-sm mb-3">🃏 シングル売却（カード一覧より自動反映）</h3>
+            {soldSingles.length === 0 ? (
+              <p className="text-gray-600 text-sm py-4 text-center">売却済みシングルカードがありません</p>
+            ) : (
+              <div className="space-y-2">
+                {soldSingles.map(c => {
+                  const invest = (c.purchasePrice || 0) * (c.quantity || 1);
+                  const roi    = c.salePrice - invest;
+                  const proxyUrl = c.imageUrl ? `/api/image-proxy?url=${encodeURIComponent(c.imageUrl)}` : null;
+                  return (
+                    <div key={c.id} className="bg-gray-800 rounded-xl p-3 flex items-center gap-3">
+                      <div className="w-10 h-14 flex-shrink-0 rounded-lg overflow-hidden bg-gray-700 flex items-center justify-center">
+                        {proxyUrl
+                          ? <img src={proxyUrl} alt={c.name} className="w-full h-full object-cover" loading="lazy"
+                              onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
+                          : null}
+                        <span className="text-lg" style={proxyUrl ? { display: 'none' } : {}}>🃏</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-white text-sm font-semibold truncate">{c.name}</span>
+                          <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${conditionColor(c.condition)}`}>{c.condition}</span>
+                          {c.cardCode && <span className="text-indigo-400 text-xs font-mono">{c.cardCode}</span>}
+                        </div>
+                        <div className="flex gap-3 mt-1 text-xs flex-wrap">
+                          <span className="text-gray-400">枚数: <span className="text-white">{c.quantity}</span></span>
+                          <span className="text-gray-400">投資: <span className="text-yellow-300">{fmtJpy(invest)}</span></span>
+                          <span className="text-gray-400">売却: <span className="text-emerald-400 font-bold">{fmtJpy(c.salePrice)}</span></span>
+                          <span className={`font-bold ${roi >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            ROI: {roi >= 0 ? '+' : ''}{fmtJpy(roi)}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-gray-500 text-xs flex-shrink-0">{fmtDate(c.date)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* その他売却リスト */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-gray-300 font-semibold text-sm">📦 その他売却（ノーマル等）</h3>
+              {!showOtherForm && !editingOther && (
+                <button onClick={() => setShowOtherForm(true)}
+                  className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">
+                  ＋ 追加
+                </button>
+              )}
+            </div>
+            {showOtherForm && (
+              <div className="mb-3">
+                <OtherSaleForm onSave={handleOtherSave} onCancel={() => setShowOtherForm(false)} />
+              </div>
+            )}
+            {otherSales.length === 0 && !showOtherForm ? (
+              <p className="text-gray-600 text-sm py-4 text-center">その他売却の記録がありません</p>
+            ) : (
+              <div className="space-y-2">
+                {otherSales.map(o => {
+                  if (editingOther?.id === o.id) {
+                    return <OtherSaleForm key={o.id} sale={editingOther}
+                      onSave={handleOtherSave} onCancel={() => setEditingOther(null)} />;
+                  }
+                  const proxyUrl = o.imageUrl ? `/api/image-proxy?url=${encodeURIComponent(o.imageUrl)}` : null;
+                  return (
+                    <div key={o.id} className="bg-gray-800 rounded-xl p-3 flex items-center gap-3">
+                      {proxyUrl ? (
+                        <div className="w-10 h-14 flex-shrink-0 rounded-lg overflow-hidden bg-gray-700">
+                          <img src={proxyUrl} alt={o.description} className="w-full h-full object-cover" loading="lazy"
+                            onError={e => { e.target.style.display = 'none'; }} />
+                        </div>
+                      ) : (
+                        <div className="w-10 h-14 flex-shrink-0 rounded-lg bg-gray-700 flex items-center justify-center text-lg">📦</div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-semibold">{o.description}</p>
+                        {o.notes && <p className="text-gray-500 text-xs mt-0.5">{o.notes}</p>}
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-emerald-400 font-bold text-sm">{fmtJpy(o.saleAmount)}</div>
+                        <div className="text-gray-500 text-xs">{fmtDate(o.date)}</div>
+                      </div>
+                      <div className="flex flex-col gap-1 flex-shrink-0">
+                        <button onClick={() => setEditingOther(o)} className="text-gray-500 hover:text-indigo-400 text-xs px-1">編集</button>
+                        <button onClick={async () => { if (confirm(`「${o.description}」を削除しますか？`)) await onDeleteOtherSale(o.id); }}
+                          className="text-gray-500 hover:text-red-400 text-xs px-1">削除</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // ── TorekaPage（サブタブ付き）─────────────────────────────────────────
+    const TorekaPage = ({ cards, onAdd, onUpdate, onDelete, torekaTotal, onSaveTorekaTotal, otherSales, onAddOtherSale, onUpdateOtherSale, onDeleteOtherSale }) => {
+      const [torekaTab,   setTorekaTab]   = useState('cards');
       const [showForm,    setShowForm]    = useState(false);
       const [editing,     setEditing]     = useState(null);
       const [selectedKey, setSelectedKey] = useState(null);
       const [search,      setSearch]      = useState('');
       const [condFilter,  setCondFilter]  = useState('all');
-      const [luffyOnly,    setLuffyOnly]    = useState(false);
-      const [editingTotal, setEditingTotal] = useState(false);
-      const [totalInput,   setTotalInput]   = useState('');
+      const [luffyOnly,   setLuffyOnly]   = useState(false);
+      const [editingTotal,setEditingTotal]= useState(false);
+      const [totalInput,  setTotalInput]  = useState('');
 
       const openEditTotal = () => { setTotalInput(torekaTotal > 0 ? String(torekaTotal) : ''); setEditingTotal(true); };
       const saveTotal     = async () => { await onSaveTorekaTotal(parseFloat(totalInput) || 0); setEditingTotal(false); };
 
-      // Summary stats（全カード対象）
+      // サマリー（全体）
       const stats = useMemo(() => {
-        const singleInvest = cards.reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
-        const soldCards    = cards.filter(c => c.salePrice != null);
-        const sales        = soldCards.reduce((s,c) => s + (c.salePrice||0), 0);
-        const roi          = sales - torekaTotal;           // トータル投資額ベースROI
-        const uniqueCards  = new Set(cards.map(groupKey)).size;
-        return { singleInvest, sales, roi, soldCount: soldCards.length, uniqueCards };
-      }, [cards, torekaTotal]);
+        const singleInvest    = cards.reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
+        const singleSales     = cards.filter(c => c.salePrice != null).reduce((s,c) => s + (c.salePrice||0), 0);
+        const otherTotal      = otherSales.reduce((s,o) => s + (o.saleAmount||0), 0);
+        const grandSales      = singleSales + otherTotal;
+        const roi             = grandSales - torekaTotal;
+        const uniqueCards     = new Set(cards.map(groupKey)).size;
+        return { singleInvest, singleSales, otherTotal, grandSales, roi, uniqueCards };
+      }, [cards, otherSales, torekaTotal]);
 
-      // フィルター後のカード一覧
       const filtered = useMemo(() => {
         let cs = [...cards];
         if (luffyOnly)     cs = cs.filter(c => c.name.includes('ルフィ') || c.name.toLowerCase().includes('luffy'));
@@ -2706,7 +2929,6 @@
         return cs;
       }, [cards, search, condFilter, luffyOnly]);
 
-      // グループ化（グリッド表示用）
       const groups = useMemo(() => {
         const map = {};
         filtered.forEach(c => {
@@ -2717,7 +2939,6 @@
         return Object.values(map);
       }, [filtered]);
 
-      // 選択中グループ（全カードから再計算してモーダルをリアルタイム更新）
       const selectedGroup = useMemo(() => {
         if (!selectedKey) return null;
         const map = {};
@@ -2735,105 +2956,104 @@
       };
 
       return (
-        <div className="space-y-6">
-          {/* Summary */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {/* トータル投資額（手動入力） */}
-            <div className="bg-gray-800 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-gray-400 text-xs">トータル投資額</span>
-                <button onClick={openEditTotal} className="text-gray-600 hover:text-indigo-400 text-xs">✏️</button>
-              </div>
-              {editingTotal ? (
-                <div className="flex items-center gap-1 mt-1">
-                  <span className="text-gray-400 text-sm">¥</span>
-                  <input type="number" min="0" value={totalInput} onChange={e=>setTotalInput(e.target.value)}
-                    onKeyDown={e=>{ if(e.key==='Enter') saveTotal(); if(e.key==='Escape') setEditingTotal(false); }}
-                    autoFocus
-                    className="flex-1 bg-gray-700 text-white rounded px-2 py-1 text-sm border border-indigo-500 focus:outline-none w-0" />
-                  <button onClick={saveTotal} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-2 py-1 rounded">✓</button>
-                </div>
-              ) : (
-                <div className="font-bold text-lg font-mono text-orange-300 cursor-pointer" onClick={openEditTotal}>
-                  {torekaTotal > 0 ? fmtJpy(torekaTotal) : <span className="text-gray-600 text-sm">クリックして入力</span>}
-                </div>
-              )}
-              <div className="text-gray-500 text-xs mt-0.5">{stats.uniqueCards}種 パック・経費込み</div>
-            </div>
-            {/* メインシングル投資額 */}
-            <div className="bg-gray-800 rounded-xl p-4">
-              <div className="text-gray-400 text-xs mb-1">メインシングル投資額</div>
-              <div className="font-bold text-lg font-mono text-yellow-300">{fmtJpy(stats.singleInvest)}</div>
-              <div className="text-gray-500 text-xs mt-0.5">カード購入額の合計</div>
-            </div>
-            {/* 売却額合計 */}
-            <div className="bg-gray-800 rounded-xl p-4">
-              <div className="text-gray-400 text-xs mb-1">売却額合計</div>
-              <div className="font-bold text-lg font-mono text-emerald-300">{fmtJpy(stats.sales)}</div>
-              <div className="text-gray-500 text-xs mt-0.5">{stats.soldCount}件売却済</div>
-            </div>
-            {/* 実現ROI */}
-            <div className="bg-gray-800 rounded-xl p-4">
-              <div className="text-gray-400 text-xs mb-1">実現ROI</div>
-              <div className={`font-bold text-lg font-mono ${stats.roi >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {torekaTotal > 0 ? fmtJpy(stats.roi) : <span className="text-gray-600 text-sm">投資額を入力</span>}
-              </div>
-              <div className="text-gray-500 text-xs mt-0.5">
-                {torekaTotal > 0 && stats.sales > 0
-                  ? `売却額 − トータル投資額`
-                  : '売却額 − トータル投資額'}
-              </div>
-            </div>
-          </div>
-
-          {/* Controls */}
-          <div className="flex flex-wrap items-center gap-2">
-            <input value={search} onChange={e=>setSearch(e.target.value)}
-              className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-indigo-500 focus:outline-none w-44"
-              placeholder="🔍 カード名・ID検索…" />
-            <select value={condFilter} onChange={e=>setCondFilter(e.target.value)}
-              className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-indigo-500 focus:outline-none">
-              <option value="all">すべての状態</option>
-              {CARD_CONDITIONS.map(c=><option key={c} value={c}>{c}</option>)}
-            </select>
-            <button onClick={()=>setLuffyOnly(v=>!v)}
-              className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${luffyOnly ? 'bg-red-700 border-red-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'}`}>
-              🏴‍☠️ ルフィ
-            </button>
-            <div className="flex-1"/>
-            <button onClick={()=>{ setEditing(null); setShowForm(v=>!v); }}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold">
-              {showForm && !editing ? '✕ 閉じる' : '＋ カード登録'}
-            </button>
-          </div>
-
-          {/* 新規登録 / 編集フォーム */}
-          {showForm && (
-            <CardForm card={editing} onSave={handleSave} onCancel={()=>{ setShowForm(false); setEditing(null); }} />
-          )}
-
-          {/* カードグリッド */}
-          {groups.length === 0 && !showForm && (
-            <div className="text-center py-20 text-gray-600">
-              <div className="text-5xl mb-3">🃏</div>
-              <p className="text-sm">{cards.length === 0 ? 'カードを登録してください' : '条件に一致するカードがありません'}</p>
-            </div>
-          )}
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-9 gap-3">
-            {groups.map(g => (
-              <CardGridItem key={g.key} group={g} onClick={()=>setSelectedKey(g.key)} />
+        <div className="space-y-5">
+          {/* サブタブ */}
+          <div className="flex gap-2">
+            {[{key:'cards',label:'📋 カード一覧'},{key:'sales',label:'💴 売却管理'}].map(t=>(
+              <button key={t.key} onClick={()=>setTorekaTab(t.key)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${torekaTab===t.key?'bg-indigo-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>
+                {t.label}
+              </button>
             ))}
           </div>
 
-          {/* 詳細モーダル */}
-          {selectedGroup && (
-            <CardDetailModal
-              group={selectedGroup}
-              onClose={()=>setSelectedKey(null)}
-              onAdd={onAdd}
-              onUpdate={onUpdate}
-              onDelete={onDelete}
-            />
+          {/* ── カード一覧タブ ── */}
+          {torekaTab==='cards' && (<>
+            {/* Summary */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-gray-800 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-gray-400 text-xs">トータル投資額</span>
+                  <button onClick={openEditTotal} className="text-gray-600 hover:text-indigo-400 text-xs">✏️</button>
+                </div>
+                {editingTotal ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-400 text-sm">¥</span>
+                    <input type="number" min="0" value={totalInput} onChange={e=>setTotalInput(e.target.value)}
+                      onKeyDown={e=>{ if(e.key==='Enter') saveTotal(); if(e.key==='Escape') setEditingTotal(false); }}
+                      autoFocus className="flex-1 bg-gray-700 text-white rounded px-2 py-1 text-sm border border-indigo-500 focus:outline-none w-0" />
+                    <button onClick={saveTotal} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-2 py-1 rounded">✓</button>
+                  </div>
+                ) : (
+                  <div className="font-bold text-lg font-mono text-orange-300 cursor-pointer" onClick={openEditTotal}>
+                    {torekaTotal > 0 ? fmtJpy(torekaTotal) : <span className="text-gray-600 text-sm">クリックして入力</span>}
+                  </div>
+                )}
+                <div className="text-gray-500 text-xs mt-0.5">{stats.uniqueCards}種 パック・経費込み</div>
+              </div>
+              <div className="bg-gray-800 rounded-xl p-4">
+                <div className="text-gray-400 text-xs mb-1">メインシングル投資額</div>
+                <div className="font-bold text-lg font-mono text-yellow-300">{fmtJpy(stats.singleInvest)}</div>
+                <div className="text-gray-500 text-xs mt-0.5">カード購入額の合計</div>
+              </div>
+              <div className="bg-gray-800 rounded-xl p-4">
+                <div className="text-gray-400 text-xs mb-1">売却額合計</div>
+                <div className="font-bold text-lg font-mono text-emerald-300">{fmtJpy(stats.grandSales)}</div>
+                <div className="text-gray-500 text-xs mt-0.5">シングル＋その他</div>
+              </div>
+              <div className="bg-gray-800 rounded-xl p-4">
+                <div className="text-gray-400 text-xs mb-1">実現ROI</div>
+                <div className={`font-bold text-lg font-mono ${stats.roi>=0?'text-emerald-400':'text-red-400'}`}>
+                  {torekaTotal>0 ? fmtJpy(stats.roi) : <span className="text-gray-600 text-sm">投資額を入力</span>}
+                </div>
+                <div className="text-gray-500 text-xs mt-0.5">売却合計 − トータル投資額</div>
+              </div>
+            </div>
+            {/* コントロール */}
+            <div className="flex flex-wrap items-center gap-2">
+              <input value={search} onChange={e=>setSearch(e.target.value)}
+                className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-indigo-500 focus:outline-none w-44"
+                placeholder="🔍 カード名・ID検索…" />
+              <select value={condFilter} onChange={e=>setCondFilter(e.target.value)}
+                className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-indigo-500 focus:outline-none">
+                <option value="all">すべての状態</option>
+                {CARD_CONDITIONS.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+              <button onClick={()=>setLuffyOnly(v=>!v)}
+                className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${luffyOnly?'bg-red-700 border-red-500 text-white':'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'}`}>
+                🏴‍☠️ ルフィ
+              </button>
+              <div className="flex-1"/>
+              <button onClick={()=>{ setEditing(null); setShowForm(v=>!v); }}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                {showForm&&!editing?'✕ 閉じる':'＋ カード登録'}
+              </button>
+            </div>
+            {showForm && (
+              <CardForm card={editing} onSave={handleSave} onCancel={()=>{ setShowForm(false); setEditing(null); }} />
+            )}
+            {groups.length===0&&!showForm&&(
+              <div className="text-center py-20 text-gray-600">
+                <div className="text-5xl mb-3">🃏</div>
+                <p className="text-sm">{cards.length===0?'カードを登録してください':'条件に一致するカードがありません'}</p>
+              </div>
+            )}
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-9 gap-3">
+              {groups.map(g=>(
+                <CardGridItem key={g.key} group={g} onClick={()=>setSelectedKey(g.key)} />
+              ))}
+            </div>
+            {selectedGroup&&(
+              <CardDetailModal group={selectedGroup} onClose={()=>setSelectedKey(null)}
+                onAdd={onAdd} onUpdate={onUpdate} onDelete={onDelete} />
+            )}
+          </>)}
+
+          {/* ── 売却管理タブ ── */}
+          {torekaTab==='sales'&&(
+            <SalesTab cards={cards} otherSales={otherSales}
+              onAddOtherSale={onAddOtherSale} onUpdateOtherSale={onUpdateOtherSale} onDeleteOtherSale={onDeleteOtherSale}
+              torekaTotal={torekaTotal} onSaveTorekaTotal={onSaveTorekaTotal} />
           )}
         </div>
       );
@@ -3123,6 +3343,7 @@
       const [handReviews,    setHandReviews]     = useState([]);
       const [predictionBets, setPredictionBets]  = useState([]);
       const [torekaCards,    setTorekaCards]     = useState([]);
+      const [otherSales,     setOtherSales]      = useState([]);
       const [settings,       setSettings]        = useState(DEFAULT_SETTINGS);
       const [section,        setSection]         = useState('trading');
       const [tab,            setTab]             = useState('dashboard');
@@ -3142,7 +3363,8 @@
           api.get('/api/poker/hands'),
           api.get('/api/prediction'),
           api.get('/api/cards'),
-        ]).then(([t, s, pk, ck, hr, pb, cards]) => {
+          api.get('/api/toreka/sales'),
+        ]).then(([t, s, pk, ck, hr, pb, cards, os]) => {
           setTrades(t);
           setSettings({...DEFAULT_SETTINGS, ...s});
           setPokerSessions(pk);
@@ -3152,6 +3374,7 @@
           setHandReviews(hr);
           setPredictionBets(pb);
           setTorekaCards(cards);
+          setOtherSales(os);
           setLoading(false);
           // If server has no trades yet, check for local data to migrate
           if (t.length === 0) {
@@ -3257,6 +3480,18 @@
       const deleteTorekaCard = async (id) => {
         await api.del(`/api/cards/${id}`);
         setTorekaCards(cs => cs.filter(x => x.id !== id));
+      };
+      const addOtherSale = async (sale) => {
+        const s = await api.post('/api/toreka/sales', sale);
+        setOtherSales(os => [s, ...os]);
+      };
+      const updateOtherSale = async (sale) => {
+        const s = await api.put(`/api/toreka/sales/${sale.id}`, sale);
+        setOtherSales(os => os.map(x => x.id===sale.id ? s : x));
+      };
+      const deleteOtherSale = async (id) => {
+        await api.del(`/api/toreka/sales/${id}`);
+        setOtherSales(os => os.filter(x => x.id !== id));
       };
 
       const realMetrics = useMemo(()=>calcMetrics(trades, settings.initialBalance, settings, month),[trades,settings,month]);
@@ -3365,7 +3600,9 @@
               <TorekaPage cards={torekaCards}
                 onAdd={addTorekaCard} onUpdate={updateTorekaCard} onDelete={deleteTorekaCard}
                 torekaTotal={settings.torekaTotal||0}
-                onSaveTorekaTotal={async(v)=>{ await saveSettings({...settings, torekaTotal:v}); }}/>
+                onSaveTorekaTotal={async(v)=>{ await saveSettings({...settings, torekaTotal:v}); }}
+                otherSales={otherSales}
+                onAddOtherSale={addOtherSale} onUpdateOtherSale={updateOtherSale} onDeleteOtherSale={deleteOtherSale}/>
             )}
             {/* Calendar section */}
             {section==='calendar'&&(

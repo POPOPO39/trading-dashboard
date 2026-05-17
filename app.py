@@ -433,6 +433,73 @@ def image_proxy():
         print(f'image_proxy error: {e}')
         return jsonify({'error': str(e)}), 502
 
+# --- Toreka Other Sales API ---
+
+def row_to_other_sale(row):
+    return {
+        'id':          row['id'],
+        'date':        row['date'],
+        'description': row.get('description', '') or '',
+        'saleAmount':  row.get('sale_amount', 0) or 0,
+        'imageUrl':    row.get('image_url', '') or '',
+        'notes':       row.get('notes', '') or '',
+    }
+
+@app.route('/api/toreka/sales', methods=['GET'])
+def get_other_sales():
+    try:
+        res = supabase.table('toreka_other_sales').select('*').order('date', desc=True).execute()
+        return jsonify([row_to_other_sale(r) for r in res.data])
+    except Exception as e:
+        print(f'get_other_sales error: {e}')
+        return jsonify([])
+
+@app.route('/api/toreka/sales', methods=['POST'])
+def add_other_sale():
+    try:
+        data = request.json
+        row = {
+            'id':          data['id'],
+            'date':        data['date'],
+            'description': data.get('description', ''),
+            'sale_amount': float(data.get('saleAmount', 0)),
+            'image_url':   data.get('imageUrl', ''),
+            'notes':       data.get('notes', ''),
+        }
+        res = supabase.table('toreka_other_sales').insert(row).execute()
+        return jsonify(row_to_other_sale(res.data[0])), 201
+    except Exception as e:
+        print(f'add_other_sale error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/toreka/sales/<sale_id>', methods=['PUT'])
+def update_other_sale(sale_id):
+    try:
+        data = request.json
+        row = {
+            'date':        data['date'],
+            'description': data.get('description', ''),
+            'sale_amount': float(data.get('saleAmount', 0)),
+            'image_url':   data.get('imageUrl', ''),
+            'notes':       data.get('notes', ''),
+        }
+        res = supabase.table('toreka_other_sales').update(row).eq('id', sale_id).execute()
+        if not res.data:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify(row_to_other_sale(res.data[0]))
+    except Exception as e:
+        print(f'update_other_sale error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/toreka/sales/<sale_id>', methods=['DELETE'])
+def delete_other_sale(sale_id):
+    try:
+        supabase.table('toreka_other_sales').delete().eq('id', sale_id).execute()
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f'delete_other_sale error: {e}')
+        return jsonify({'error': str(e)}), 500
+
 # --- Trading Cards API ---
 
 def row_to_card(row):
