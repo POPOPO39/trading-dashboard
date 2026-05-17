@@ -401,5 +401,87 @@ def delete_hand_review(hand_id):
         print(f'delete_hand_review error: {e}')
         return jsonify({'error': str(e)}), 500
 
+# --- Trading Cards API ---
+
+def row_to_card(row):
+    return {
+        'id':            row['id'],
+        'name':          row.get('name', ''),
+        'imageUrl':      row.get('image_url', '') or '',
+        'condition':     row.get('condition', 'A'),
+        'quantity':      row.get('quantity', 1),
+        'purchasePrice': row.get('purchase_price', 0) or 0,
+        'salePrice':     row.get('sale_price'),   # None = 保有中
+        'notes':         row.get('notes', '') or '',
+        'date':          row['date'],
+    }
+
+def parse_sale_price(data):
+    v = data.get('salePrice')
+    if v is None or v == '':
+        return None
+    return float(v)
+
+@app.route('/api/cards', methods=['GET'])
+def get_cards():
+    try:
+        res = supabase.table('trading_cards').select('*').order('date', desc=True).execute()
+        return jsonify([row_to_card(r) for r in res.data])
+    except Exception as e:
+        print(f'get_cards error: {e}')
+        return jsonify([])
+
+@app.route('/api/cards', methods=['POST'])
+def add_card():
+    try:
+        data = request.json
+        row = {
+            'id':             data['id'],
+            'name':           data.get('name', ''),
+            'image_url':      data.get('imageUrl', ''),
+            'condition':      data.get('condition', 'A'),
+            'quantity':       int(data.get('quantity', 1)),
+            'purchase_price': float(data.get('purchasePrice', 0)),
+            'sale_price':     parse_sale_price(data),
+            'notes':          data.get('notes', ''),
+            'date':           data['date'],
+        }
+        res = supabase.table('trading_cards').insert(row).execute()
+        return jsonify(row_to_card(res.data[0])), 201
+    except Exception as e:
+        print(f'add_card error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cards/<card_id>', methods=['PUT'])
+def update_card(card_id):
+    try:
+        data = request.json
+        row = {
+            'name':           data.get('name', ''),
+            'image_url':      data.get('imageUrl', ''),
+            'condition':      data.get('condition', 'A'),
+            'quantity':       int(data.get('quantity', 1)),
+            'purchase_price': float(data.get('purchasePrice', 0)),
+            'sale_price':     parse_sale_price(data),
+            'notes':          data.get('notes', ''),
+            'date':           data['date'],
+        }
+        res = supabase.table('trading_cards').update(row).eq('id', card_id).execute()
+        if not res.data:
+            return jsonify({'error': 'Card not found'}), 404
+        return jsonify(row_to_card(res.data[0]))
+    except Exception as e:
+        print(f'update_card error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cards/<card_id>', methods=['DELETE'])
+def delete_card(card_id):
+    try:
+        supabase.table('trading_cards').delete().eq('id', card_id).execute()
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f'delete_card error: {e}')
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

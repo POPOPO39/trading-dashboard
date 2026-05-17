@@ -2312,6 +2312,252 @@
     };
 
     // ══════════════════════════════════════════════════════════════════════
+    // TOREKA PAGE
+    // ══════════════════════════════════════════════════════════════════════
+    const CARD_CONDITIONS = ['未開封','SS','A','A-','B','PSA10'];
+
+    const conditionColor = (c) => ({
+      '未開封': 'bg-sky-900 text-sky-300',
+      'SS':     'bg-yellow-800 text-yellow-300',
+      'A':      'bg-green-900 text-green-300',
+      'A-':     'bg-emerald-900 text-emerald-400',
+      'B':      'bg-gray-700 text-gray-300',
+      'PSA10':  'bg-purple-900 text-purple-300',
+    }[c] || 'bg-gray-700 text-gray-300');
+
+    const fmtJpy = (v) => {
+      if (v == null || isNaN(v)) return '—';
+      return '¥' + Math.round(v).toLocaleString();
+    };
+
+    const CardForm = ({ card, onSave, onCancel }) => {
+      const blank = {
+        id: uid(), name:'', imageUrl:'', condition:'A', quantity:1,
+        purchasePrice:'', salePrice:'', notes:'', date: todayStr(),
+      };
+      const [form, setForm] = useState(card ? {
+        ...card,
+        purchasePrice: card.purchasePrice ?? '',
+        salePrice:     card.salePrice    ?? '',
+      } : blank);
+
+      const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+      const handleSave = () => {
+        if (!form.name.trim()) { alert('カード名を入力してください'); return; }
+        if (!form.date)        { alert('購入日を入力してください');   return; }
+        onSave({
+          ...form,
+          quantity:      parseInt(form.quantity)      || 1,
+          purchasePrice: parseFloat(form.purchasePrice) || 0,
+          salePrice:     form.salePrice !== '' ? parseFloat(form.salePrice) : null,
+        });
+      };
+
+      return (
+        <div className="bg-gray-800 rounded-xl p-5 space-y-4 fade-in">
+          <h3 className="text-white font-bold text-base">{card ? 'カード編集' : '新規カード登録'}</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="text-gray-400 text-xs block mb-1">カード名 *</label>
+              <input value={form.name} onChange={e=>set('name',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none"
+                placeholder="例: 黒炎王 リザードン ex" />
+            </div>
+            <div className="col-span-2">
+              <label className="text-gray-400 text-xs block mb-1">画像URL（任意）</label>
+              <input value={form.imageUrl} onChange={e=>set('imageUrl',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none"
+                placeholder="https://..." />
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs block mb-1">購入日 *</label>
+              <input type="date" value={form.date} onChange={e=>set('date',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs block mb-1">状態</label>
+              <select value={form.condition} onChange={e=>set('condition',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none">
+                {CARD_CONDITIONS.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs block mb-1">枚数</label>
+              <input type="number" min="1" value={form.quantity} onChange={e=>set('quantity',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs block mb-1">購入金額/枚 (¥)</label>
+              <input type="number" min="0" step="1" value={form.purchasePrice} onChange={e=>set('purchasePrice',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none"
+                placeholder="0" />
+            </div>
+            <div>
+              <label className="text-gray-400 text-xs block mb-1">売却額合計 (¥)　<span className="text-gray-500 text-xs">空欄=保有中</span></label>
+              <input type="number" min="0" step="1" value={form.salePrice} onChange={e=>set('salePrice',e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none"
+                placeholder="未売却" />
+            </div>
+            <div className="col-span-2">
+              <label className="text-gray-400 text-xs block mb-1">メモ</label>
+              <textarea value={form.notes} onChange={e=>set('notes',e.target.value)} rows={2}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-indigo-500 focus:outline-none resize-none"
+                placeholder="シリアル番号、購入先など" />
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end pt-1">
+            <button onClick={onCancel} className="px-4 py-2 text-gray-400 hover:text-white text-sm">キャンセル</button>
+            <button onClick={handleSave} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-lg text-sm font-semibold">保存</button>
+          </div>
+        </div>
+      );
+    };
+
+    const CardRow = ({ card, onEdit, onDelete }) => {
+      const invest = (card.purchasePrice || 0) * (card.quantity || 1);
+      const sold   = card.salePrice != null;
+      const roi    = sold ? card.salePrice - invest : null;
+
+      return (
+        <div className="bg-gray-800 hover:bg-gray-750 rounded-xl p-4 flex gap-4 items-start transition-colors">
+          {/* Image */}
+          <div className="flex-shrink-0 w-16 h-20 rounded-lg overflow-hidden bg-gray-700 flex items-center justify-center">
+            {card.imageUrl
+              ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='flex';}} />
+              : null}
+            <span className="text-2xl" style={card.imageUrl?{display:'none'}:{}}>🃏</span>
+          </div>
+          {/* Info */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2 flex-wrap">
+              <div>
+                <span className="text-white font-semibold text-sm leading-tight block">{card.name}</span>
+                <span className="text-gray-500 text-xs">{fmtDate(card.date)}</span>
+              </div>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${conditionColor(card.condition)}`}>{card.condition}</span>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs">
+              <span className="text-gray-400">枚数: <span className="text-white font-medium">{card.quantity}</span></span>
+              <span className="text-gray-400">購入/枚: <span className="text-white font-medium">{fmtJpy(card.purchasePrice)}</span></span>
+              <span className="text-gray-400">投資額: <span className="text-yellow-300 font-medium">{fmtJpy(invest)}</span></span>
+              {sold
+                ? <span className="text-gray-400">売却額: <span className="text-emerald-400 font-medium">{fmtJpy(card.salePrice)}</span></span>
+                : <span className="text-sky-400">保有中</span>}
+              {roi != null && (
+                <span className="text-gray-400">ROI:
+                  <span className={`font-bold ml-1 ${roi>=0?'text-emerald-400':'text-red-400'}`}>
+                    {roi >= 0 ? '+' : ''}{fmtJpy(roi)}
+                    {invest > 0 && <span className="text-xs ml-1">({(roi/invest*100).toFixed(1)}%)</span>}
+                  </span>
+                </span>
+              )}
+            </div>
+            {card.notes && <p className="text-gray-500 text-xs mt-1 truncate">{card.notes}</p>}
+          </div>
+          {/* Actions */}
+          <div className="flex flex-col gap-1 flex-shrink-0">
+            <button onClick={()=>onEdit(card)} className="text-gray-500 hover:text-indigo-400 text-xs px-2 py-1">編集</button>
+            <button onClick={()=>{ if(confirm(`「${card.name}」を削除しますか？`)) onDelete(card.id); }}
+              className="text-gray-500 hover:text-red-400 text-xs px-2 py-1">削除</button>
+          </div>
+        </div>
+      );
+    };
+
+    const TorekaPage = ({ cards, onAdd, onUpdate, onDelete }) => {
+      const [showForm, setShowForm] = useState(false);
+      const [editing,  setEditing]  = useState(null);
+      const [search,   setSearch]   = useState('');
+      const [condFilter, setCondFilter] = useState('all');
+
+      // Summary stats
+      const stats = useMemo(() => {
+        const invest   = cards.reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
+        const soldCards = cards.filter(c => c.salePrice != null);
+        const sales    = soldCards.reduce((s,c) => s + (c.salePrice||0), 0);
+        const soldInvest = soldCards.reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
+        const roi      = sales - soldInvest;
+        const holding  = cards.filter(c => c.salePrice == null).reduce((s,c) => s + (c.purchasePrice||0)*(c.quantity||1), 0);
+        return { invest, sales, roi, holding, soldCount: soldCards.length, totalCount: cards.length };
+      }, [cards]);
+
+      const filtered = useMemo(() => {
+        let cs = [...cards];
+        if (search.trim()) {
+          const q = search.trim().toLowerCase();
+          cs = cs.filter(c => c.name.toLowerCase().includes(q) || (c.notes||'').toLowerCase().includes(q));
+        }
+        if (condFilter !== 'all') cs = cs.filter(c => c.condition === condFilter);
+        return cs;
+      }, [cards, search, condFilter]);
+
+      const handleSave = async (data) => {
+        if (editing) { await onUpdate(data); setEditing(null); }
+        else         { await onAdd(data);    setShowForm(false); }
+      };
+      const handleEdit = (card) => { setEditing(card); setShowForm(false); };
+
+      return (
+        <div className="space-y-6">
+          {/* Summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label:'総投資額',     value: fmtJpy(stats.invest),   sub:`${stats.totalCount}枚`,            color:'text-yellow-300' },
+              { label:'保有資産額',   value: fmtJpy(stats.holding),  sub:'未売却分のみ',                       color:'text-sky-300' },
+              { label:'売却額合計',   value: fmtJpy(stats.sales),    sub:`${stats.soldCount}枚売却済`,         color:'text-emerald-300' },
+              { label:'実現ROI',      value: fmtJpy(stats.roi),      sub: stats.invest>0 ? `売却分のみ` : '—', color: stats.roi >= 0 ? 'text-emerald-400' : 'text-red-400' },
+            ].map(({label,value,sub,color})=>(
+              <div key={label} className="bg-gray-800 rounded-xl p-4">
+                <div className="text-gray-400 text-xs mb-1">{label}</div>
+                <div className={`font-bold text-lg font-mono ${color}`}>{value}</div>
+                <div className="text-gray-500 text-xs mt-0.5">{sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Controls */}
+          <div className="flex flex-wrap items-center gap-3">
+            <input value={search} onChange={e=>setSearch(e.target.value)}
+              className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-indigo-500 focus:outline-none w-48"
+              placeholder="🔍 カード名検索…" />
+            <select value={condFilter} onChange={e=>setCondFilter(e.target.value)}
+              className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-indigo-500 focus:outline-none">
+              <option value="all">すべての状態</option>
+              {CARD_CONDITIONS.map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+            <div className="flex-1"/>
+            {!showForm && !editing && (
+              <button onClick={()=>setShowForm(true)}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                ＋ カード登録
+              </button>
+            )}
+          </div>
+
+          {/* Add form */}
+          {showForm && (
+            <CardForm onSave={handleSave} onCancel={()=>setShowForm(false)} />
+          )}
+
+          {/* Card list */}
+          {filtered.length === 0 && !showForm && !editing && (
+            <div className="text-center py-16 text-gray-600">
+              <div className="text-4xl mb-3">🃏</div>
+              <p className="text-sm">{cards.length === 0 ? 'カードを登録してください' : '条件に一致するカードがありません'}</p>
+            </div>
+          )}
+          <div className="space-y-3">
+            {filtered.map(c => editing?.id === c.id
+              ? <CardForm key={c.id} card={editing} onSave={handleSave} onCancel={()=>setEditing(null)} />
+              : <CardRow  key={c.id} card={c} onEdit={handleEdit} onDelete={onDelete} />
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
     // CALENDAR CHART
     // ══════════════════════════════════════════════════════════════════════
     const CalendarChart = ({ month, dayData, daysInMon, filters, graphRange, pokerSessions, trades, predictionBets }) => {
@@ -2584,6 +2830,7 @@
       {key:'trading', label:'📈 投資・トレード'},
       {key:'poker',   label:'🃏 Poker'},
       {key:'predict', label:'🔮 予測市場'},
+      {key:'toreka',  label:'🎴 トレカ'},
       {key:'calendar',label:'📅 カレンダー'},
     ];
 
@@ -2593,6 +2840,7 @@
       const [pokerCheckins,  setPokerCheckins]   = useState({});
       const [handReviews,    setHandReviews]     = useState([]);
       const [predictionBets, setPredictionBets]  = useState([]);
+      const [torekaCards,    setTorekaCards]     = useState([]);
       const [settings,       setSettings]        = useState(DEFAULT_SETTINGS);
       const [section,        setSection]         = useState('trading');
       const [tab,            setTab]             = useState('dashboard');
@@ -2611,7 +2859,8 @@
           api.get('/api/poker/checkins'),
           api.get('/api/poker/hands'),
           api.get('/api/prediction'),
-        ]).then(([t, s, pk, ck, hr, pb]) => {
+          api.get('/api/cards'),
+        ]).then(([t, s, pk, ck, hr, pb, cards]) => {
           setTrades(t);
           setSettings({...DEFAULT_SETTINGS, ...s});
           setPokerSessions(pk);
@@ -2620,6 +2869,7 @@
           setPokerCheckins(ckMap);
           setHandReviews(hr);
           setPredictionBets(pb);
+          setTorekaCards(cards);
           setLoading(false);
           // If server has no trades yet, check for local data to migrate
           if (t.length === 0) {
@@ -2713,7 +2963,20 @@
         await api.del(`/api/prediction/${id}`);
         setPredictionBets(bs => bs.filter(x => x.id !== id));
       };
-      
+
+      const addTorekaCard = async (card) => {
+        const c = await api.post('/api/cards', card);
+        setTorekaCards(cs => [c, ...cs]);
+      };
+      const updateTorekaCard = async (card) => {
+        const c = await api.put(`/api/cards/${card.id}`, card);
+        setTorekaCards(cs => cs.map(x => x.id===card.id ? c : x));
+      };
+      const deleteTorekaCard = async (id) => {
+        await api.del(`/api/cards/${id}`);
+        setTorekaCards(cs => cs.filter(x => x.id !== id));
+      };
+
       const realMetrics = useMemo(()=>calcMetrics(trades, settings.initialBalance, settings, month),[trades,settings,month]);
 
       const monthOptions = useMemo(()=>{
@@ -2814,6 +3077,11 @@
             {section==='predict'&&(
               <PredictionPage bets={predictionBets}
                 onAdd={addPredictionBet} onUpdate={updatePredictionBet} onDelete={deletePredictionBet}/>
+            )}
+            {/* Toreka section */}
+            {section==='toreka'&&(
+              <TorekaPage cards={torekaCards}
+                onAdd={addTorekaCard} onUpdate={updateTorekaCard} onDelete={deleteTorekaCard}/>
             )}
             {/* Calendar section */}
             {section==='calendar'&&(
